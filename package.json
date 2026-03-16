@@ -1,0 +1,32 @@
+{
+  "name": "stay-nestura-pms",
+  "version": "1.0.0",
+  "description": "Stay Nestura Properties Management System - Channel Manager & PMS",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "db:init": "node backend/scripts/initDb.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "pg": "^8.11.3",
+    "redis": "^4.6.10",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "helmet": "^7.1.0",
+    "morgan": "^1.10.0",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "node-cron": "^3.0.3",
+    "axios": "^1.6.2",
+    "twilio": "^4.19.3",
+    "nodemailer": "^6.9.7",
+    "crypto-js": "^4.2.0",
+    "uuid": "^9.0.1",
+    "socket.io": "^4.6.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}
