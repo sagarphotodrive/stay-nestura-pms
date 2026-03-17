@@ -5,10 +5,11 @@ import axios from 'axios';
 import { format, addDays } from 'date-fns';
 import {
   LayoutDashboard, Building2, Calendar, Users,
-  Receipt, BarChart3, Settings, Bell, Menu, X,
+  IndianRupee, BarChart3, Settings, Bell, Menu, X,
   Plus, Search, ChevronRight, Home, LogOut,
   RefreshCw, DollarSign, TrendingUp, UserCheck,
-  UserX, AlertCircle, CheckCircle, Clock, Link2, Trash2, ExternalLink, Edit3
+  UserX, AlertCircle, CheckCircle, Clock, Link2, Trash2, ExternalLink, Edit3,
+  Download, Upload
 } from 'lucide-react';
 
 // API Configuration
@@ -115,7 +116,7 @@ const Sidebar = ({ isOpen, onClose, activeTab, setActiveTab }) => {
     { id: 'calendar', icon: Calendar, label: 'Master Calendar' },
     { id: 'bookings', icon: UserCheck, label: 'Bookings' },
     { id: 'guests', icon: Users, label: 'Guests' },
-    { id: 'expenses', icon: Receipt, label: 'Expenses' },
+    { id: 'expenses', icon: IndianRupee, label: 'Expenses' },
     { id: 'reports', icon: BarChart3, label: 'Reports' },
     { id: 'settings', icon: Settings, label: 'Settings' },
   ];
@@ -293,6 +294,7 @@ const Dashboard = () => {
 
 // Properties Component
 const Properties = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [properties, setProperties] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -301,6 +303,9 @@ const Properties = () => {
   const [form, setForm] = useState(emptyForm);
 
   useEffect(() => { fetchProperties(); }, []);
+  useEffect(() => {
+    if (searchParams.get('action') === 'new') { openAdd(); setSearchParams({}, { replace: true }); }
+  }, []);
 
   const fetchProperties = async () => {
     try { const res = await api.get('/properties'); setProperties(res.data); } catch (err) { console.error(err); } finally { setLoading(false); }
@@ -361,13 +366,13 @@ const Properties = () => {
 
       <div className="properties-grid">
         {properties.map((property) => (
-          <div key={property.id} className="property-card">
+          <div key={property.id} className="property-card" style={{ position: 'relative' }}>
+            <div className="card-actions">
+              <button className="card-edit-btn" onClick={() => openEdit(property)} title="Edit"><Edit3 size={14} /></button>
+              <button className="card-edit-btn" onClick={() => handleDelete(property.id)} title="Delete"><Trash2 size={14} /></button>
+            </div>
             <div className="property-image">
               <Building2 size={40} />
-              <div className="card-actions">
-                <button className="btn-icon-sm" onClick={() => openEdit(property)} title="Edit"><Edit3 size={14} /></button>
-                <button className="btn-icon-sm" onClick={() => handleDelete(property.id)} title="Delete"><Trash2 size={14} /></button>
-              </div>
             </div>
             <div className="property-info">
               <h3>{property.name}</h3>
@@ -676,23 +681,25 @@ const Bookings = () => {
   const [editId, setEditId] = useState(null);
   const [properties, setProperties] = useState([]);
   const [availabilityStatus, setAvailabilityStatus] = useState(null);
-  const emptyBForm = { property_id: '', first_name: '', last_name: '', phone: '', email: '', check_in: '', check_out: '', adults: 1, children: 0, nightly_rate: '', channel: 'direct', payment_method: 'UPI', special_requests: '' };
+  const emptyBForm = { property_id: '', first_name: '', last_name: '', phone: '', email: '', check_in: '', check_out: '', adults: 1, children: 0, nightly_rate: '', channel: 'direct', payment_method: 'UPI', special_requests: '', advance_paid: 0 };
   const [bForm, setBForm] = useState(emptyBForm);
 
-  // Auto-open prefilled form from calendar click
+  // Auto-open prefilled form from calendar click or homepage action=new
   useEffect(() => {
     const pid = searchParams.get('property_id');
     const ci = searchParams.get('check_in');
     const co = searchParams.get('check_out');
     const rate = searchParams.get('nightly_rate');
+    const action = searchParams.get('action');
     if (pid && ci) {
       setBForm(prev => ({ ...prev, property_id: pid, check_in: ci, check_out: co || '', nightly_rate: rate || '' }));
-      // Fetch properties then open form
       api.get('/properties').then(res => {
         setProperties(res.data || []);
         setShowForm(true);
       }).catch(() => {});
-      // Clear params so it doesn't reopen on re-render
+      setSearchParams({}, { replace: true });
+    } else if (action === 'new') {
+      openForm();
       setSearchParams({}, { replace: true });
     }
   }, []);
@@ -759,7 +766,8 @@ const Bookings = () => {
     try {
       const nights = Math.max(1, Math.ceil((new Date(bForm.check_out) - new Date(bForm.check_in)) / 86400000));
       const gross = parseFloat(bForm.nightly_rate) * nights;
-      const data = { ...bForm, property_id: parseInt(bForm.property_id), nightly_rate: parseFloat(bForm.nightly_rate), gross_amount: gross, adults: parseInt(bForm.adults), children: parseInt(bForm.children) };
+      const advancePaid = parseFloat(bForm.advance_paid) || 0;
+      const data = { ...bForm, property_id: parseInt(bForm.property_id), nightly_rate: parseFloat(bForm.nightly_rate), gross_amount: gross, adults: parseInt(bForm.adults), children: parseInt(bForm.children), paid_amount: advancePaid, pending_amount: gross - advancePaid, payment_status: advancePaid >= gross ? 'paid' : advancePaid > 0 ? 'partial' : 'pending' };
       if (editId) { await api.put(`/bookings/${editId}`, data); } else { await api.post('/bookings', data); }
       setShowForm(false);
       setBForm(emptyBForm);
@@ -776,6 +784,16 @@ const Bookings = () => {
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const recordPayment = async (booking) => {
+    const pending = (booking.pending_amount || booking.gross_amount || 0);
+    const amount = prompt(`Balance due: ₹${pending.toLocaleString()}\nEnter amount received:`, pending);
+    if (!amount || isNaN(amount) || parseFloat(amount) <= 0) return;
+    try {
+      await api.patch(`/bookings/${booking.id}/payment`, { amount: parseFloat(amount) });
+      fetchBookings();
+    } catch (err) { console.error(err); }
   };
 
   if (loading) return <LoadingSpinner />;
@@ -828,6 +846,21 @@ const Bookings = () => {
                 <div className="form-group"><label>Nightly Rate (₹) *</label><input required type="number" value={bForm.nightly_rate} onChange={e => setBForm({...bForm, nightly_rate: e.target.value})} placeholder="e.g. 2500"/></div>
                 <div className="form-group"><label>Channel</label><select value={bForm.channel} onChange={e => setBForm({...bForm, channel: e.target.value})}><option value="direct">Direct</option><option value="airbnb">Airbnb</option><option value="booking.com">Booking.com</option><option value="makemytrip">MakeMyTrip</option><option value="goibibo">Goibibo</option></select></div>
               </div>
+
+              {/* Total & Advance Payment */}
+              {bForm.nightly_rate && bForm.check_in && bForm.check_out && (() => {
+                const nights = Math.max(1, Math.ceil((new Date(bForm.check_out) - new Date(bForm.check_in)) / 86400000));
+                const total = parseFloat(bForm.nightly_rate) * nights;
+                const advance = parseFloat(bForm.advance_paid) || 0;
+                const balance = total - advance;
+                return (
+                  <div className="payment-summary-box">
+                    <div className="payment-row"><span>Total Amount ({nights} night{nights > 1 ? 's' : ''})</span><strong>₹{total.toLocaleString()}</strong></div>
+                    <div className="form-group" style={{ margin: '8px 0' }}><label>Advance Paid (₹)</label><input type="number" min="0" value={bForm.advance_paid} onChange={e => setBForm({...bForm, advance_paid: e.target.value})} placeholder="0"/></div>
+                    <div className="payment-row" style={{ color: balance > 0 ? '#ef4444' : '#10b981' }}><span>Balance Due</span><strong>₹{balance.toLocaleString()}</strong></div>
+                  </div>
+                );
+              })()}
               <div className="form-row">
                 <div className="form-group"><label>Adults</label><input type="number" min="1" value={bForm.adults} onChange={e => setBForm({...bForm, adults: e.target.value})}/></div>
                 <div className="form-group"><label>Children</label><input type="number" min="0" value={bForm.children} onChange={e => setBForm({...bForm, children: e.target.value})}/></div>
@@ -880,8 +913,10 @@ const Bookings = () => {
                 </div>
               </div>
               <div className="booking-amount">
-                <span className="amount">₹{parseFloat(booking.net_amount).toLocaleString()}</span>
+                <span className="amount">₹{parseFloat(booking.gross_amount || booking.net_amount).toLocaleString()}</span>
                 <span className="channel">{booking.channel}</span>
+                {booking.paid_amount > 0 && <span className="text-success" style={{fontSize:'12px'}}>Paid: ₹{parseFloat(booking.paid_amount).toLocaleString()}</span>}
+                {(booking.pending_amount || 0) > 0 && <span className="text-danger" style={{fontSize:'12px'}}>Due: ₹{parseFloat(booking.pending_amount).toLocaleString()}</span>}
               </div>
             </div>
             <div className="booking-actions">
@@ -889,6 +924,9 @@ const Bookings = () => {
                 {booking.booking_status}
               </span>
               <button className="btn btn-sm btn-edit" onClick={() => openEdit(booking)}><Edit3 size={14} /> Edit</button>
+              {(booking.pending_amount || 0) > 0 && booking.booking_status !== 'cancelled' && (
+                <button className="btn btn-sm btn-success" onClick={() => recordPayment(booking)}><IndianRupee size={14} /> Record Payment</button>
+              )}
               {booking.booking_status === 'confirmed' && (
                 <button className="btn btn-sm" onClick={() => updateStatus(booking.id, 'checked-in')}>
                   Check In
@@ -912,6 +950,7 @@ const Bookings = () => {
 
 // Guests Component
 const Guests = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [guests, setGuests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -921,6 +960,9 @@ const Guests = () => {
   const [gForm, setGForm] = useState(emptyGForm);
 
   useEffect(() => { fetchGuests(); }, [search]);
+  useEffect(() => {
+    if (searchParams.get('action') === 'new') { openAdd(); setSearchParams({}, { replace: true }); }
+  }, []);
 
   const fetchGuests = async () => {
     try { const params = search ? { search } : {}; const res = await api.get('/guests', { params }); setGuests(res.data.guests || []); } catch (err) { console.error(err); } finally { setLoading(false); }
@@ -1016,6 +1058,7 @@ const Guests = () => {
 
 // Expenses Component
 const Expenses = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [expenses, setExpenses] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1027,6 +1070,9 @@ const Expenses = () => {
 
   useEffect(() => {
     fetchExpenses();
+  }, []);
+  useEffect(() => {
+    if (searchParams.get('action') === 'new') { openExpForm(); setSearchParams({}, { replace: true }); }
   }, []);
 
   const fetchExpenses = async () => {
@@ -1377,7 +1423,7 @@ const Reports = () => {
       {activeTab === 'expenses' && expSummary && (
         <div className="report-sections">
           <div className="stats-grid">
-            <StatCard title="Total Expenses" value={`₹${(expSummary.total || 0).toLocaleString()}`} icon={Receipt} color="#ef4444" />
+            <StatCard title="Total Expenses" value={`₹${(expSummary.total || 0).toLocaleString()}`} icon={IndianRupee} color="#ef4444" />
           </div>
           <div className="card" style={{ marginTop: '16px' }}>
             <div className="card-header"><h3>Expense by Category</h3></div>
@@ -1519,6 +1565,66 @@ const Reports = () => {
   );
 };
 
+// Settings Component - Data Export/Import
+const SettingsPage = () => {
+  const [importStatus, setImportStatus] = useState(null);
+
+  const handleExport = async () => {
+    try {
+      const res = await api.get('/data/export');
+      const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `stay-nestura-backup-${new Date().toISOString().split('T')[0]}.json`;
+      a.click(); URL.revokeObjectURL(url);
+    } catch (err) { console.error(err); alert('Export failed'); }
+  };
+
+  const handleImport = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (!window.confirm(`Import data from "${file.name}"?\n\nThis will REPLACE all current data:\n- ${data.properties?.length || 0} properties\n- ${data.guests?.length || 0} guests\n- ${data.bookings?.length || 0} bookings\n- ${data.expenses?.length || 0} expenses\n\nAre you sure?`)) return;
+      const res = await api.post('/data/import', data);
+      setImportStatus(res.data);
+      alert('Data imported successfully!');
+      window.location.reload();
+    } catch (err) { console.error(err); alert('Import failed: ' + err.message); }
+    e.target.value = '';
+  };
+
+  return (
+    <div className="settings-page">
+      <div className="page-header"><h1>Settings</h1></div>
+      <div className="settings-section">
+        <h2>Data Management</h2>
+        <p style={{ color: '#6b7280', marginBottom: '20px' }}>Export your data as a JSON backup file, or import data from a previous backup to migrate between deployments.</p>
+        <div className="settings-cards">
+          <div className="settings-card">
+            <div className="settings-card-icon" style={{ background: 'linear-gradient(135deg, #3b82f6, #06b6d4)' }}><Download size={24} /></div>
+            <h3>Export Data</h3>
+            <p>Download all properties, bookings, guests, and expenses as a JSON file.</p>
+            <button className="btn btn-primary" onClick={handleExport}><Download size={16} /> Export Backup</button>
+          </div>
+          <div className="settings-card">
+            <div className="settings-card-icon" style={{ background: 'linear-gradient(135deg, #10b981, #06b6d4)' }}><Upload size={24} /></div>
+            <h3>Import Data</h3>
+            <p>Upload a previously exported JSON backup file to restore or migrate data.</p>
+            <label className="btn btn-primary" style={{ cursor: 'pointer' }}><Upload size={16} /> Import Backup<input type="file" accept=".json" onChange={handleImport} style={{ display: 'none' }} /></label>
+          </div>
+        </div>
+        {importStatus && (
+          <div className="import-result">
+            <CheckCircle size={16} /> Imported: {importStatus.imported?.properties || 0} properties, {importStatus.imported?.guests || 0} guests, {importStatus.imported?.bookings || 0} bookings, {importStatus.imported?.expenses || 0} expenses
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // Main Layout Component
 const Layout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -1567,6 +1673,7 @@ const Layout = () => {
           <Route path="/guests" element={<Guests />} />
           <Route path="/expenses" element={<Expenses />} />
           <Route path="/reports" element={<Reports />} />
+          <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </main>
     </div>

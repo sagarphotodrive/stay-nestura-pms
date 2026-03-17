@@ -7,11 +7,59 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const http = require('http');
 const path = require('path');
+const fs = require('fs');
 const { Server } = require('socket.io');
 require('dotenv').config();
 
 // Import in-memory data store
 const { store } = require('./backend/config/database');
+
+// ============ FILE-BASED PERSISTENCE ============
+const DATA_FILE = path.join(__dirname, 'data', 'store.json');
+
+// Load persisted data on startup
+function loadPersistedData() {
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      const raw = fs.readFileSync(DATA_FILE, 'utf8');
+      const saved = JSON.parse(raw);
+      if (saved.properties && saved.properties.length > 0) store.properties = saved.properties;
+      if (saved.guests) store.guests = saved.guests;
+      if (saved.bookings) store.bookings = saved.bookings;
+      if (saved.expenses) store.expenses = saved.expenses;
+      if (saved.ical_links) store.ical_links = saved.ical_links;
+      if (saved.sync_logs) store.sync_logs = saved.sync_logs;
+      if (saved._idCounter) _idCounter = saved._idCounter;
+      console.log('[Persistence] Loaded data from disk');
+    }
+  } catch (err) {
+    console.log('[Persistence] No saved data found, starting fresh');
+  }
+}
+
+// Save data to disk (debounced)
+let _saveTimer = null;
+function persistData() {
+  if (_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => {
+    try {
+      const dir = path.dirname(DATA_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const toSave = {
+        properties: store.properties,
+        guests: store.guests,
+        bookings: store.bookings,
+        expenses: store.expenses,
+        ical_links: store.ical_links,
+        sync_logs: store.sync_logs,
+        _idCounter
+      };
+      fs.writeFileSync(DATA_FILE, JSON.stringify(toSave, null, 2));
+    } catch (err) {
+      console.error('[Persistence] Save error:', err.message);
+    }
+  }, 500);
+}
 
 // Import auth route (has demo login)
 const authRoutes = require('./backend/routes/auth');
@@ -43,6 +91,18 @@ app.use('/api/auth', authRoutes);
 // ============ IN-MEMORY API ROUTES ============
 let _idCounter = 200;
 const _nextId = () => ++_idCounter;
+
+// Load persisted data before serving requests
+loadPersistedData();
+
+// Auto-persist after any mutation
+app.use((req, res, next) => {
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+    const origJson = res.json.bind(res);
+    res.json = (data) => { persistData(); return origJson(data); };
+  }
+  next();
+});
 
 // --- PROPERTIES ---
 app.get('/api/properties', (req, res) => {
@@ -173,6 +233,17 @@ app.put('/api/bookings/:id', (req, res) => {
   const b = store.bookings.find(bk => bk.id == req.params.id);
   if (!b) return res.status(404).json({ error: 'Not found' });
   Object.assign(b, req.body, { updated_at: new Date().toISOString() });
+  res.json(b);
+});
+app.patch('/api/bookings/:id/payment', (req, res) => {
+  const b = store.bookings.find(bk => bk.id == req.params.id);
+  if (!b) return res.status(404).json({ error: 'Not found' });
+  const amount = parseFloat(req.body.amount) || 0;
+  b.paid_amount = (b.paid_amount || 0) + amount;
+  b.pending_amount = (b.gross_amount || 0) - b.paid_amount;
+  if (b.pending_amount <= 0) { b.pending_amount = 0; b.payment_status = 'paid'; }
+  else { b.payment_status = 'partial'; }
+  b.updated_at = new Date().toISOString();
   res.json(b);
 });
 app.post('/api/bookings/:id/cancel', (req, res) => {
@@ -802,10 +873,10 @@ app.get('/', (req, res) => {
 
     <!-- Quick Actions -->
     <div class="quick-actions">
-      <a href="/app/bookings" class="qa-btn">+ New Booking</a>
-      <a href="/app/properties" class="qa-btn">+ Add Property</a>
-      <a href="/app/guests" class="qa-btn">+ Add Guest</a>
-      <a href="/app/expenses" class="qa-btn">+ Record Expense</a>
+      <a href="/app/bookings?action=new" class="qa-btn">+ New Booking</a>
+      <a href="/app/properties?action=new" class="qa-btn">+ Add Property</a>
+      <a href="/app/guests?action=new" class="qa-btn">+ Add Guest</a>
+      <a href="/app/expenses?action=new" class="qa-btn">+ Record Expense</a>
       <a href="/api/health" class="qa-btn" target="_blank">API Health Check</a>
     </div>
 
@@ -1168,6 +1239,42 @@ app.use((err, req, res, next) => {
     error: 'Something went wrong!',
     message: process.env.NODE_ENV === 'development' ? err.message : undefined
   });
+});
+
+// --- DATA EXPORT/IMPORT ---
+app.get('/api/data/export', (req, res) => {
+  const exportData = {
+    version: '1.0',
+    exported_at: new Date().toISOString(),
+    properties: store.properties,
+    guests: store.guests,
+    bookings: store.bookings,
+    expenses: store.expenses,
+    ical_links: store.ical_links || [],
+    channel_accounts: store.channel_accounts || []
+  };
+  res.setHeader('Content-Disposition', 'attachment; filename=stay-nestura-backup.json');
+  res.json(exportData);
+});
+app.post('/api/data/import', (req, res) => {
+  try {
+    const data = req.body;
+    if (!data || !data.version) return res.status(400).json({ error: 'Invalid backup file' });
+    let imported = { properties: 0, guests: 0, bookings: 0, expenses: 0 };
+    if (data.properties && data.properties.length > 0) { store.properties = data.properties; imported.properties = data.properties.length; }
+    if (data.guests) { store.guests = data.guests; imported.guests = data.guests.length; }
+    if (data.bookings) { store.bookings = data.bookings; imported.bookings = data.bookings.length; }
+    if (data.expenses) { store.expenses = data.expenses; imported.expenses = data.expenses.length; }
+    if (data.ical_links) { store.ical_links = data.ical_links; }
+    if (data.channel_accounts) { store.channel_accounts = data.channel_accounts; }
+    // Update ID counter to avoid collisions
+    const allIds = [...store.properties, ...store.guests, ...store.bookings, ...store.expenses].map(i => i.id || 0);
+    _idCounter = Math.max(_idCounter, ...allIds) + 1;
+    persistData();
+    res.json({ success: true, message: 'Data imported successfully', imported });
+  } catch (err) {
+    res.status(500).json({ error: 'Import failed: ' + err.message });
+  }
 });
 
 // 404 handler
