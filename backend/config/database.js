@@ -10,7 +10,14 @@ const nextId = () => ++idCounter;
 // ============ IN-MEMORY DATA STORES ============
 
 const store = {
-  properties: [],
+  properties: [
+    { id: 1, name: 'Torna Homestay', property_type: 'Homestay', address: 'Near Torna Fort', city: 'Velhe', state: 'Maharashtra', pincode: '412212', total_rooms: 2, max_guests: 6, base_price: 3500, description: 'Luxury homestay with mountain views near Torna Fort', amenities: ['WiFi', 'Parking', 'Kitchen', 'Mountain View'], images: [], latitude: 18.2769, longitude: 73.6131, google_maps_link: '', is_active: true, created_at: '2024-01-15T00:00:00Z', updated_at: '2024-01-15T00:00:00Z' },
+    { id: 2, name: 'Shivneri Homestay', property_type: 'Homestay', address: 'Near Shivneri Fort', city: 'Junnar', state: 'Maharashtra', pincode: '410502', total_rooms: 2, max_guests: 4, base_price: 2500, description: 'Premium homestay near Shivneri fort with valley views', amenities: ['WiFi', 'Parking', 'Breakfast'], images: [], latitude: 19.2094, longitude: 73.8567, google_maps_link: '', is_active: true, created_at: '2024-01-20T00:00:00Z', updated_at: '2024-01-20T00:00:00Z' },
+    { id: 3, name: 'Rajlakshmi Niwas', property_type: 'Homestay', address: 'City Center', city: 'Pune', state: 'Maharashtra', pincode: '411001', total_rooms: 1, max_guests: 3, base_price: 1800, description: 'Comfortable stay in city center of Pune', amenities: ['WiFi', 'AC', 'TV'], images: [], latitude: 18.5204, longitude: 73.8567, google_maps_link: '', is_active: true, created_at: '2024-02-01T00:00:00Z', updated_at: '2024-02-01T00:00:00Z' },
+    { id: 4, name: 'Solapur Homestay 1', property_type: 'Homestay', address: 'Station Road', city: 'Solapur', state: 'Maharashtra', pincode: '413001', total_rooms: 1, max_guests: 2, base_price: 1200, description: 'Budget-friendly option near railway station', amenities: ['WiFi', 'TV'], images: [], latitude: 17.6599, longitude: 75.9064, google_maps_link: '', is_active: true, created_at: '2024-02-10T00:00:00Z', updated_at: '2024-02-10T00:00:00Z' },
+    { id: 5, name: 'Budget Room 1', property_type: 'Room', address: 'MG Road', city: 'Pune', state: 'Maharashtra', pincode: '411001', total_rooms: 1, max_guests: 2, base_price: 800, description: 'Economy room with basic amenities', amenities: ['WiFi', 'Fan'], images: [], latitude: 18.5204, longitude: 73.8567, google_maps_link: '', is_active: true, created_at: '2024-03-01T00:00:00Z', updated_at: '2024-03-01T00:00:00Z' },
+    { id: 6, name: 'Budget Room Deluxe', property_type: 'Room', address: 'FC Road', city: 'Pune', state: 'Maharashtra', pincode: '411004', total_rooms: 1, max_guests: 2, base_price: 1100, description: 'Deluxe room with extra comfort', amenities: ['WiFi', 'AC', 'TV', 'Mini Fridge'], images: [], latitude: 18.5204, longitude: 73.8567, google_maps_link: '', is_active: true, created_at: '2024-03-05T00:00:00Z', updated_at: '2024-03-05T00:00:00Z' },
+  ],
   guests: [],
   bookings: [],
   expenses: [],
