@@ -1,14 +1,14 @@
-import React, { useState, useEffect, createContext, useContext } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
+import React, { useState, useEffect, createContext, useContext, useCallback } from 'react';
+import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import axios from 'axios';
 import { format, addDays } from 'date-fns';
-import { 
-  LayoutDashboard, Building2, Calendar, Users, 
+import {
+  LayoutDashboard, Building2, Calendar, Users,
   Receipt, BarChart3, Settings, Bell, Menu, X,
   Plus, Search, ChevronRight, Home, LogOut,
   RefreshCw, DollarSign, TrendingUp, UserCheck,
-  UserX, AlertCircle, CheckCircle, Clock
+  UserX, AlertCircle, CheckCircle, Clock, Link2, Trash2, ExternalLink
 } from 'lucide-react';
 
 // API Configuration
@@ -77,22 +77,22 @@ const Login = () => {
           {error && <div className="alert alert-error">{error}</div>}
           <div className="form-group">
             <label>Email</label>
-            <input 
-              type="email" 
-              value={email} 
+            <input
+              type="email"
+              value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Enter your email"
-              required 
+              required
             />
           </div>
           <div className="form-group">
             <label>Password</label>
-            <input 
-              type="password" 
-              value={password} 
+            <input
+              type="password"
+              value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Enter your password"
-              required 
+              required
             />
           </div>
           <button type="submit" className="btn btn-primary btn-block">
@@ -193,27 +193,27 @@ const Dashboard = () => {
       </div>
 
       <div className="stats-grid">
-        <StatCard 
-          title="Today's Check-ins" 
-          value={stats?.today?.today_checkins || 0} 
+        <StatCard
+          title="Today's Check-ins"
+          value={stats?.today?.today_checkins || 0}
           icon={UserCheck}
           color="#10b981"
         />
-        <StatCard 
-          title="Today's Check-outs" 
-          value={stats?.today?.today_checkouts || 0} 
+        <StatCard
+          title="Today's Check-outs"
+          value={stats?.today?.today_checkouts || 0}
           icon={LogOut}
           color="#f59e0b"
         />
-        <StatCard 
-          title="Month Revenue" 
-          value={`₹${(stats?.month?.net_revenue || 0).toLocaleString()}`} 
+        <StatCard
+          title="Month Revenue"
+          value={`₹${(stats?.month?.net_revenue || 0).toLocaleString()}`}
           icon={DollarSign}
           color="#3b82f6"
         />
-        <StatCard 
-          title="Pending Payments" 
-          value={stats?.pending?.length || 0} 
+        <StatCard
+          title="Pending Payments"
+          value={stats?.pending?.length || 0}
           icon={AlertCircle}
           color="#ef4444"
         />
@@ -229,8 +229,8 @@ const Dashboard = () => {
               <div key={prop.name} className="occupancy-item">
                 <span className="occupancy-name">{prop.name}</span>
                 <div className="occupancy-bar">
-                  <div 
-                    className="occupancy-fill" 
+                  <div
+                    className="occupancy-fill"
                     style={{ width: `${prop.occupancy}%` }}
                   />
                 </div>
@@ -269,7 +269,7 @@ const Dashboard = () => {
       <div className="quick-actions">
         <h3>Quick Actions</h3>
         <div className="actions-grid">
-          <Link to="/bookings/new" className="action-btn">
+          <Link to="/bookings" className="action-btn">
             <Plus size={20} />
             <span>New Booking</span>
           </Link>
@@ -403,6 +403,11 @@ const MasterCalendar = () => {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [viewDate, setViewDate] = useState(new Date());
+  const [selectedBooking, setSelectedBooking] = useState(null);
+  const [icalLinks, setIcalLinks] = useState([]);
+  const [showIcalSection, setShowIcalSection] = useState(false);
+  const [icalForm, setIcalForm] = useState({ property_id: '', channel: 'airbnb', ical_url: '', label: '' });
+  const navigate = useNavigate();
   const days = Array.from({ length: 35 }, (_, i) => addDays(viewDate, i - 7));
 
   useEffect(() => {
@@ -411,17 +416,19 @@ const MasterCalendar = () => {
 
   const fetchData = async () => {
     try {
-      const [propRes, bookingRes] = await Promise.all([
+      const [propRes, bookingRes, icalRes] = await Promise.all([
         api.get('/properties'),
         api.get('/bookings', {
           params: {
             start_date: days[0].toISOString().split('T')[0],
             end_date: days[days.length - 1].toISOString().split('T')[0]
           }
-        })
+        }),
+        api.get('/ical-links')
       ]);
       setProperties(propRes.data);
       setBookings(bookingRes.data.bookings || []);
+      setIcalLinks(icalRes.data || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -430,11 +437,25 @@ const MasterCalendar = () => {
   };
 
   const getBookingForDate = (propertyId, date) => {
-    return bookings.find(b => 
+    return bookings.find(b =>
       b.property_id === propertyId &&
       new Date(b.check_in) <= date &&
-      new Date(b.check_out) > date
+      new Date(b.check_out) > date &&
+      b.booking_status !== 'cancelled'
     );
+  };
+
+  const handleAddIcalLink = async (e) => {
+    e.preventDefault();
+    try {
+      await api.post('/ical-links', { ...icalForm, property_id: parseInt(icalForm.property_id) });
+      setIcalForm({ property_id: '', channel: 'airbnb', ical_url: '', label: '' });
+      fetchData();
+    } catch (err) { console.error(err); }
+  };
+
+  const deleteIcalLink = async (id) => {
+    try { await api.delete(`/ical-links/${id}`); fetchData(); } catch (err) { console.error(err); }
   };
 
   if (loading) return <LoadingSpinner />;
@@ -469,14 +490,27 @@ const MasterCalendar = () => {
                 const booking = getBookingForDate(property.id, day);
                 const isToday = format(day, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd');
                 return (
-                  <div 
-                    key={day.toISOString()} 
-                    className={`day-cell ${booking ? 'booked' : ''} ${isToday ? 'today' : ''}`}
+                  <div
+                    key={day.toISOString()}
+                    className={`day-cell ${booking ? 'booked' : 'available-click'} ${isToday ? 'today' : ''}`}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => {
+                      if (booking) {
+                        setSelectedBooking(booking);
+                      } else {
+                        const dateStr = format(day, 'yyyy-MM-dd');
+                        const nextDay = format(addDays(day, 1), 'yyyy-MM-dd');
+                        navigate(`/bookings?property_id=${property.id}&check_in=${dateStr}&check_out=${nextDay}&nightly_rate=${property.base_price}`);
+                      }
+                    }}
+                    title={booking ? `${booking.first_name} ${booking.last_name} - ${booking.channel}` : `Click to book ${property.name} on ${format(day, 'MMM dd')}`}
                   >
-                    {booking && (
+                    {booking ? (
                       <div className="booking-badge" title={`${booking.first_name} ${booking.last_name}`}>
                         {booking.first_name?.[0]}
                       </div>
+                    ) : (
+                      <div className="empty-cell-plus">+</div>
                     )}
                   </div>
                 );
@@ -500,19 +534,165 @@ const MasterCalendar = () => {
           <span>Today</span>
         </div>
       </div>
+
+      {/* Booking Detail Modal */}
+      {selectedBooking && (
+        <div className="modal-overlay" onClick={() => setSelectedBooking(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Booking Details</h2>
+              <button className="modal-close" onClick={() => setSelectedBooking(null)}><X size={20}/></button>
+            </div>
+            <div className="booking-detail-modal">
+              <div className="detail-row">
+                <span className="detail-label">Guest</span>
+                <span className="detail-value">{selectedBooking.first_name} {selectedBooking.last_name}</span>
+              </div>
+              <div className="detail-row">
+                <span className="detail-label">Property</span>
+                <span className="detail-value">{selectedBooking.property_name}</span>
+              </div>
+              <div className="detail-row">
+                <span className="detail-label">Check-in</span>
+                <span className="detail-value">{format(new Date(selectedBooking.check_in), 'MMM dd, yyyy')}</span>
+              </div>
+              <div className="detail-row">
+                <span className="detail-label">Check-out</span>
+                <span className="detail-value">{format(new Date(selectedBooking.check_out), 'MMM dd, yyyy')}</span>
+              </div>
+              <div className="detail-row">
+                <span className="detail-label">Channel</span>
+                <span className="detail-value">{selectedBooking.channel}</span>
+              </div>
+              <div className="detail-row">
+                <span className="detail-label">Amount</span>
+                <span className="detail-value">₹{parseFloat(selectedBooking.net_amount || 0).toLocaleString()}</span>
+              </div>
+              <div className="detail-row">
+                <span className="detail-label">Status</span>
+                <span className={`status-badge ${selectedBooking.booking_status}`}>{selectedBooking.booking_status}</span>
+              </div>
+              <div className="detail-row">
+                <span className="detail-label">Payment</span>
+                <span className="detail-value">{selectedBooking.payment_status} ({selectedBooking.payment_method || 'N/A'})</span>
+              </div>
+              {selectedBooking.special_requests && (
+                <div className="detail-row">
+                  <span className="detail-label">Requests</span>
+                  <span className="detail-value">{selectedBooking.special_requests}</span>
+                </div>
+              )}
+              <div className="form-actions" style={{ marginTop: '16px' }}>
+                <button className="btn btn-primary" onClick={() => { setSelectedBooking(null); navigate('/bookings'); }}>
+                  View All Bookings
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* OTA Calendar Links Section */}
+      <div className="ical-section">
+        <div className="ical-header" onClick={() => setShowIcalSection(!showIcalSection)} style={{ cursor: 'pointer' }}>
+          <h3><Link2 size={18} /> OTA Calendar Links</h3>
+          <span>{showIcalSection ? '▲' : '▼'}</span>
+        </div>
+        {showIcalSection && (
+          <div className="ical-content">
+            {properties.map(prop => {
+              const propLinks = icalLinks.filter(l => l.property_id === prop.id);
+              return (
+                <div key={prop.id} className="ical-property">
+                  <h4>{prop.name}</h4>
+                  {propLinks.length > 0 ? (
+                    <div className="ical-links-list">
+                      {propLinks.map(link => (
+                        <div key={link.id} className="ical-link-item">
+                          <span className={`channel-tag ${link.channel}`}>{link.channel}</span>
+                          <span className="ical-label">{link.label}</span>
+                          {link.ical_url && (
+                            <a href={link.ical_url} target="_blank" rel="noopener noreferrer" className="ical-url-link"><ExternalLink size={14} /></a>
+                          )}
+                          <button className="btn-icon-sm" onClick={() => deleteIcalLink(link.id)}><Trash2 size={14} /></button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="empty-state-sm">No calendar links added</p>
+                  )}
+                </div>
+              );
+            })}
+            <form onSubmit={handleAddIcalLink} className="ical-add-form">
+              <h4>Add Calendar Link</h4>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Property</label>
+                  <select required value={icalForm.property_id} onChange={e => setIcalForm({...icalForm, property_id: e.target.value})}>
+                    <option value="">Select property</option>
+                    {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>OTA Channel</label>
+                  <select value={icalForm.channel} onChange={e => setIcalForm({...icalForm, channel: e.target.value})}>
+                    <option value="airbnb">Airbnb</option>
+                    <option value="booking.com">Booking.com</option>
+                    <option value="agoda">Agoda</option>
+                    <option value="makemytrip">MakeMyTrip</option>
+                    <option value="goibibo">Goibibo</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>iCal URL</label>
+                  <input value={icalForm.ical_url} onChange={e => setIcalForm({...icalForm, ical_url: e.target.value})} placeholder="https://..." />
+                </div>
+                <div className="form-group">
+                  <label>Label</label>
+                  <input value={icalForm.label} onChange={e => setIcalForm({...icalForm, label: e.target.value})} placeholder="e.g. Airbnb - My Property" />
+                </div>
+              </div>
+              <button type="submit" className="btn btn-primary"><Plus size={16} /> Add Link</button>
+            </form>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
 
 // Bookings Component
 const Bookings = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const [showForm, setShowForm] = useState(false);
   const [properties, setProperties] = useState([]);
-  const [guests, setGuests] = useState([]);
-  const [bForm, setBForm] = useState({ property_id: '', guest_id: '', check_in: '', check_out: '', adults: 1, children: 0, nightly_rate: '', channel: 'direct', payment_method: 'UPI', special_requests: '' });
+  const [availabilityStatus, setAvailabilityStatus] = useState(null);
+  const [bForm, setBForm] = useState({ property_id: '', first_name: '', last_name: '', phone: '', email: '', check_in: '', check_out: '', adults: 1, children: 0, nightly_rate: '', channel: 'direct', payment_method: 'UPI', special_requests: '' });
+
+  // Auto-open prefilled form from calendar click
+  useEffect(() => {
+    const pid = searchParams.get('property_id');
+    const ci = searchParams.get('check_in');
+    const co = searchParams.get('check_out');
+    const rate = searchParams.get('nightly_rate');
+    if (pid && ci) {
+      setBForm(prev => ({ ...prev, property_id: pid, check_in: ci, check_out: co || '', nightly_rate: rate || '' }));
+      // Fetch properties then open form
+      api.get('/properties').then(res => {
+        setProperties(res.data || []);
+        setShowForm(true);
+      }).catch(() => {});
+      // Clear params so it doesn't reopen on re-render
+      setSearchParams({}, { replace: true });
+    }
+  }, []);
 
   useEffect(() => {
     fetchBookings();
@@ -530,23 +710,52 @@ const Bookings = () => {
     }
   };
 
+  // Check availability when property and dates change
+  const checkAvailability = useCallback(async () => {
+    if (bForm.property_id && bForm.check_in && bForm.check_out) {
+      try {
+        const res = await api.get('/bookings/check-availability', {
+          params: { property_id: bForm.property_id, check_in: bForm.check_in, check_out: bForm.check_out }
+        });
+        setAvailabilityStatus(res.data);
+      } catch (err) { setAvailabilityStatus(null); }
+    } else {
+      setAvailabilityStatus(null);
+    }
+  }, [bForm.property_id, bForm.check_in, bForm.check_out]);
+
+  useEffect(() => {
+    checkAvailability();
+  }, [checkAvailability]);
+
   const openForm = async () => {
     try {
-      const [pRes, gRes] = await Promise.all([api.get('/properties'), api.get('/guests')]);
+      const pRes = await api.get('/properties');
       setProperties(pRes.data || []);
-      setGuests(gRes.data.guests || []);
       setShowForm(true);
     } catch (err) { console.error(err); }
   };
 
   const handleBooking = async (e) => {
     e.preventDefault();
+    if (availabilityStatus && !availabilityStatus.available) {
+      alert('Cannot create booking: dates conflict with an existing booking.');
+      return;
+    }
     try {
       const nights = Math.max(1, Math.ceil((new Date(bForm.check_out) - new Date(bForm.check_in)) / 86400000));
       const gross = parseFloat(bForm.nightly_rate) * nights;
-      await api.post('/bookings', { ...bForm, property_id: parseInt(bForm.property_id), guest_id: parseInt(bForm.guest_id), nightly_rate: parseFloat(bForm.nightly_rate), gross_amount: gross, adults: parseInt(bForm.adults), children: parseInt(bForm.children) });
+      await api.post('/bookings', {
+        ...bForm,
+        property_id: parseInt(bForm.property_id),
+        nightly_rate: parseFloat(bForm.nightly_rate),
+        gross_amount: gross,
+        adults: parseInt(bForm.adults),
+        children: parseInt(bForm.children)
+      });
       setShowForm(false);
-      setBForm({ property_id: '', guest_id: '', check_in: '', check_out: '', adults: 1, children: 0, nightly_rate: '', channel: 'direct', payment_method: 'UPI', special_requests: '' });
+      setBForm({ property_id: '', first_name: '', last_name: '', phone: '', email: '', check_in: '', check_out: '', adults: 1, children: 0, nightly_rate: '', channel: 'direct', payment_method: 'UPI', special_requests: '' });
+      setAvailabilityStatus(null);
       fetchBookings();
     } catch (err) { console.error(err); }
   };
@@ -574,20 +783,41 @@ const Bookings = () => {
 
       {showForm && (
         <div className="modal-overlay" onClick={() => setShowForm(false)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
+          <div className="modal-content modal-large" onClick={e => e.stopPropagation()}>
             <div className="modal-header"><h2>New Booking</h2><button className="modal-close" onClick={() => setShowForm(false)}><X size={20}/></button></div>
             <form onSubmit={handleBooking} className="modal-form">
+              <div className="form-group"><label>Property *</label><select required value={bForm.property_id} onChange={e => { const p = properties.find(pr => pr.id === parseInt(e.target.value)); setBForm({...bForm, property_id: e.target.value, nightly_rate: p ? p.base_price : bForm.nightly_rate}); }}><option value="">Select property</option>{properties.map(p => <option key={p.id} value={p.id}>{p.name} - ₹{p.base_price}/night</option>)}</select></div>
+
+              <h4 style={{ margin: '12px 0 8px', color: '#94a3b8', fontSize: '14px' }}>Guest Details</h4>
               <div className="form-row">
-                <div className="form-group"><label>Property *</label><select required value={bForm.property_id} onChange={e => setBForm({...bForm, property_id: e.target.value})}><option value="">Select property</option>{properties.map(p => <option key={p.id} value={p.id}>{p.name} - Rs.{p.base_price}/night</option>)}</select></div>
-                <div className="form-group"><label>Guest *</label><select required value={bForm.guest_id} onChange={e => setBForm({...bForm, guest_id: e.target.value})}><option value="">Select guest</option>{guests.map(g => <option key={g.id} value={g.id}>{g.first_name} {g.last_name} ({g.phone})</option>)}</select></div>
+                <div className="form-group"><label>First Name *</label><input required value={bForm.first_name} onChange={e => setBForm({...bForm, first_name: e.target.value})} placeholder="First name"/></div>
+                <div className="form-group"><label>Last Name *</label><input required value={bForm.last_name} onChange={e => setBForm({...bForm, last_name: e.target.value})} placeholder="Last name"/></div>
               </div>
+              <div className="form-row">
+                <div className="form-group"><label>Phone *</label><input required value={bForm.phone} onChange={e => setBForm({...bForm, phone: e.target.value})} placeholder="10-digit mobile"/></div>
+                <div className="form-group"><label>Email</label><input type="email" value={bForm.email} onChange={e => setBForm({...bForm, email: e.target.value})} placeholder="Email address"/></div>
+              </div>
+
+              <h4 style={{ margin: '12px 0 8px', color: '#94a3b8', fontSize: '14px' }}>Booking Details</h4>
               <div className="form-row">
                 <div className="form-group"><label>Check-in *</label><input required type="date" value={bForm.check_in} onChange={e => setBForm({...bForm, check_in: e.target.value})}/></div>
                 <div className="form-group"><label>Check-out *</label><input required type="date" value={bForm.check_out} onChange={e => setBForm({...bForm, check_out: e.target.value})}/></div>
               </div>
+
+              {/* Availability Check Indicator */}
+              {availabilityStatus && (
+                <div className={`availability-indicator ${availabilityStatus.available ? 'available' : 'conflict'}`}>
+                  {availabilityStatus.available ? (
+                    <><CheckCircle size={16} /> Dates are available</>
+                  ) : (
+                    <><AlertCircle size={16} /> Conflict: Overlaps with {availabilityStatus.conflicts.map(c => `${c.guest_name} (${c.check_in} to ${c.check_out})`).join(', ')}</>
+                  )}
+                </div>
+              )}
+
               <div className="form-row">
-                <div className="form-group"><label>Nightly Rate (Rs.) *</label><input required type="number" value={bForm.nightly_rate} onChange={e => setBForm({...bForm, nightly_rate: e.target.value})} placeholder="e.g. 2500"/></div>
-                <div className="form-group"><label>Channel</label><select value={bForm.channel} onChange={e => setBForm({...bForm, channel: e.target.value})}><option value="direct">Direct</option><option value="airbnb">Airbnb</option><option value="booking.com">Booking.com</option></select></div>
+                <div className="form-group"><label>Nightly Rate (₹) *</label><input required type="number" value={bForm.nightly_rate} onChange={e => setBForm({...bForm, nightly_rate: e.target.value})} placeholder="e.g. 2500"/></div>
+                <div className="form-group"><label>Channel</label><select value={bForm.channel} onChange={e => setBForm({...bForm, channel: e.target.value})}><option value="direct">Direct</option><option value="airbnb">Airbnb</option><option value="booking.com">Booking.com</option><option value="makemytrip">MakeMyTrip</option><option value="goibibo">Goibibo</option></select></div>
               </div>
               <div className="form-row">
                 <div className="form-group"><label>Adults</label><input type="number" min="1" value={bForm.adults} onChange={e => setBForm({...bForm, adults: e.target.value})}/></div>
@@ -595,7 +825,10 @@ const Bookings = () => {
                 <div className="form-group"><label>Payment</label><select value={bForm.payment_method} onChange={e => setBForm({...bForm, payment_method: e.target.value})}><option value="UPI">UPI</option><option value="cash">Cash</option><option value="card">Card</option><option value="bank_transfer">Bank Transfer</option></select></div>
               </div>
               <div className="form-group"><label>Special Requests</label><textarea value={bForm.special_requests} onChange={e => setBForm({...bForm, special_requests: e.target.value})} rows="2" placeholder="Any special requests..."/></div>
-              <div className="form-actions"><button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>Cancel</button><button type="submit" className="btn btn-primary">Create Booking</button></div>
+              <div className="form-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={availabilityStatus && !availabilityStatus.available}>Create Booking</button>
+              </div>
             </form>
           </div>
         </div>
@@ -738,8 +971,8 @@ const Guests = () => {
 
       <div className="search-bar">
         <Search size={20} />
-        <input 
-          type="text" 
+        <input
+          type="text"
           placeholder="Search guests by name, email or phone..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -840,7 +1073,7 @@ const Expenses = () => {
               </div>
               <div className="form-group"><label>Description *</label><input required value={eForm.description} onChange={e => setEForm({...eForm, description: e.target.value})} placeholder="What is this expense for?"/></div>
               <div className="form-row">
-                <div className="form-group"><label>Amount (Rs.) *</label><input required type="number" value={eForm.amount} onChange={e => setEForm({...eForm, amount: e.target.value})} placeholder="e.g. 1500"/></div>
+                <div className="form-group"><label>Amount (₹) *</label><input required type="number" value={eForm.amount} onChange={e => setEForm({...eForm, amount: e.target.value})} placeholder="e.g. 1500"/></div>
                 <div className="form-group"><label>Date</label><input type="date" value={eForm.expense_date} onChange={e => setEForm({...eForm, expense_date: e.target.value})}/></div>
               </div>
               <div className="form-row">
@@ -888,21 +1121,43 @@ const Expenses = () => {
   );
 };
 
-// Reports Component
+// Reports Component — Enhanced with multiple tabs
 const Reports = () => {
+  const [activeTab, setActiveTab] = useState('pnl');
   const [report, setReport] = useState(null);
+  const [revenue, setRevenue] = useState(null);
+  const [guestAnalytics, setGuestAnalytics] = useState(null);
+  const [paymentSummary, setPaymentSummary] = useState(null);
+  const [adrData, setAdrData] = useState(null);
+  const [expSummary, setExpSummary] = useState(null);
+  const [occupancy, setOccupancy] = useState(null);
   const [loading, setLoading] = useState(true);
   const [year, setYear] = useState(new Date().getFullYear());
   const [month, setMonth] = useState(new Date().getMonth() + 1);
 
   useEffect(() => {
-    fetchReport();
+    fetchAllReports();
   }, [year, month]);
 
-  const fetchReport = async () => {
+  const fetchAllReports = async () => {
+    setLoading(true);
     try {
-      const res = await api.get('/reports/profit-loss', { params: { year, month } });
-      setReport(res.data);
+      const [pnlRes, revRes, guestRes, payRes, adrRes, expRes, occRes] = await Promise.all([
+        api.get('/reports/profit-loss', { params: { year, month } }),
+        api.get('/reports/revenue'),
+        api.get('/reports/guest-analytics'),
+        api.get('/reports/payment-summary'),
+        api.get('/reports/adr'),
+        api.get('/expenses/summary'),
+        api.get('/bookings/stats/overview')
+      ]);
+      setReport(pnlRes.data);
+      setRevenue(revRes.data);
+      setGuestAnalytics(guestRes.data);
+      setPaymentSummary(payRes.data);
+      setAdrData(adrRes.data);
+      setExpSummary(expRes.data);
+      setOccupancy(occRes.data);
     } catch (err) {
       console.error(err);
     } finally {
@@ -912,17 +1167,30 @@ const Reports = () => {
 
   if (loading) return <LoadingSpinner />;
 
+  const tabs = [
+    { id: 'pnl', label: 'P&L' },
+    { id: 'revenue', label: 'Revenue' },
+    { id: 'occupancy', label: 'Occupancy' },
+    { id: 'expenses', label: 'Expenses' },
+    { id: 'guests', label: 'Guests' },
+    { id: 'payments', label: 'Payments' },
+    { id: 'adr', label: 'ADR' },
+  ];
+
+  const maxChannelGross = revenue?.byChannel?.length ? Math.max(...revenue.byChannel.map(c => c.gross)) : 1;
+  const maxPropGross = revenue?.byProperty?.length ? Math.max(...revenue.byProperty.map(p => p.gross)) : 1;
+
   return (
     <div className="reports-page">
       <div className="page-header">
-        <h1>Monthly P&L Report</h1>
+        <h1>Reports & Analytics</h1>
         <div className="report-filters">
-          <select value={month} onChange={(e) => setMonth(e.target.value)}>
+          <select value={month} onChange={(e) => setMonth(parseInt(e.target.value))}>
             {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
               <option key={m} value={m}>{format(new Date(2024, m - 1), 'MMMM')}</option>
             ))}
           </select>
-          <select value={year} onChange={(e) => setYear(e.target.value)}>
+          <select value={year} onChange={(e) => setYear(parseInt(e.target.value))}>
             {[2024, 2025, 2026].map(y => (
               <option key={y} value={y}>{y}</option>
             ))}
@@ -930,7 +1198,14 @@ const Reports = () => {
         </div>
       </div>
 
-      {report && (
+      <div className="report-tabs">
+        {tabs.map(tab => (
+          <button key={tab.id} className={`report-tab ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>
+        ))}
+      </div>
+
+      {/* P&L Tab */}
+      {activeTab === 'pnl' && report && (
         <>
           <div className="report-summary">
             <div className="summary-item">
@@ -939,18 +1214,17 @@ const Reports = () => {
             </div>
             <div className="summary-item">
               <span className="label">Commissions</span>
-              <span className="value">-₹{report.totals.total_commission.toLocaleString()}</span>
+              <span className="value text-red">-₹{report.totals.total_commission.toLocaleString()}</span>
             </div>
             <div className="summary-item">
               <span className="label">Expenses</span>
-              <span className="value">-₹{report.totals.total_expenses.toLocaleString()}</span>
+              <span className="value text-red">-₹{report.totals.total_expenses.toLocaleString()}</span>
             </div>
             <div className="summary-item highlight">
               <span className="label">Net Profit</span>
               <span className="value">₹{report.totals.total_net.toLocaleString()}</span>
             </div>
           </div>
-
           <div className="report-table">
             <table>
               <thead>
@@ -969,8 +1243,8 @@ const Reports = () => {
                     <td>{prop.property_name}</td>
                     <td>{prop.occupancy_percent}%</td>
                     <td>₹{prop.gross_revenue.toLocaleString()}</td>
-                    <td>-₹{prop.commission.toLocaleString()}</td>
-                    <td>-₹{prop.expenses.toLocaleString()}</td>
+                    <td className="text-red">-₹{prop.commission.toLocaleString()}</td>
+                    <td className="text-red">-₹{prop.expenses.toLocaleString()}</td>
                     <td className="profit">₹{prop.net_profit.toLocaleString()}</td>
                   </tr>
                 ))}
@@ -978,6 +1252,246 @@ const Reports = () => {
             </table>
           </div>
         </>
+      )}
+
+      {/* Revenue Tab */}
+      {activeTab === 'revenue' && revenue && (
+        <div className="report-sections">
+          <div className="card">
+            <div className="card-header"><h3>Revenue by Channel</h3></div>
+            <div className="card-content">
+              {revenue.byChannel?.map(ch => (
+                <div key={ch.channel} className="bar-chart-row">
+                  <span className="bar-label">{ch.channel}</span>
+                  <div className="bar-container">
+                    <div className="bar-fill" style={{ width: `${(ch.gross / maxChannelGross) * 100}%`, backgroundColor: ch.channel === 'direct' ? '#10b981' : ch.channel === 'airbnb' ? '#ff5a5f' : '#003580' }}></div>
+                  </div>
+                  <span className="bar-value">₹{ch.gross.toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="card" style={{ marginTop: '16px' }}>
+            <div className="card-header"><h3>Revenue by Property</h3></div>
+            <div className="card-content">
+              {revenue.byProperty?.map(p => (
+                <div key={p.property_name} className="bar-chart-row">
+                  <span className="bar-label">{p.property_name}</span>
+                  <div className="bar-container">
+                    <div className="bar-fill" style={{ width: `${(p.gross / maxPropGross) * 100}%`, backgroundColor: '#6366f1' }}></div>
+                  </div>
+                  <span className="bar-value">₹{p.gross.toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="card" style={{ marginTop: '16px' }}>
+            <div className="card-header"><h3>Channel Commission Comparison</h3></div>
+            <div className="report-table">
+              <table>
+                <thead><tr><th>Channel</th><th>Bookings</th><th>Gross</th><th>Commission</th><th>Net</th></tr></thead>
+                <tbody>
+                  {revenue.byChannel?.map(ch => (
+                    <tr key={ch.channel}>
+                      <td>{ch.channel}</td>
+                      <td>{ch.bookings}</td>
+                      <td>₹{ch.gross.toLocaleString()}</td>
+                      <td className="text-red">-₹{ch.commission.toLocaleString()}</td>
+                      <td className="profit">₹{ch.net.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Occupancy Tab */}
+      {activeTab === 'occupancy' && occupancy && (
+        <div className="report-sections">
+          <div className="stats-grid">
+            <StatCard title="Total Bookings" value={occupancy.summary?.total_bookings || 0} icon={UserCheck} color="#10b981" />
+            <StatCard title="Unique Guests" value={occupancy.summary?.unique_guests || 0} icon={Users} color="#6366f1" />
+            <StatCard title="Gross Revenue" value={`₹${(occupancy.summary?.total_gross || 0).toLocaleString()}`} icon={DollarSign} color="#3b82f6" />
+            <StatCard title="Net Revenue" value={`₹${(occupancy.summary?.total_net || 0).toLocaleString()}`} icon={TrendingUp} color="#10b981" />
+          </div>
+          <div className="card" style={{ marginTop: '16px' }}>
+            <div className="card-header"><h3>Property Occupancy</h3></div>
+            <div className="card-content">
+              {occupancy.occupancy?.map(p => (
+                <div key={p.property_name} className="occupancy-item">
+                  <span className="occupancy-name">{p.property_name}</span>
+                  <div className="occupancy-bar">
+                    <div className="occupancy-fill" style={{ width: `${p.occupancy_percent}%` }} />
+                  </div>
+                  <span className="occupancy-percent">{p.occupancy_percent}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="card" style={{ marginTop: '16px' }}>
+            <div className="card-header"><h3>Occupancy Details</h3></div>
+            <div className="report-table">
+              <table>
+                <thead><tr><th>Property</th><th>Nights Booked</th><th>Nights Available</th><th>Occupancy %</th></tr></thead>
+                <tbody>
+                  {occupancy.occupancy?.map(p => (
+                    <tr key={p.property_name}>
+                      <td>{p.property_name}</td>
+                      <td>{p.total_nights_booked}</td>
+                      <td>{p.total_nights_available}</td>
+                      <td>{p.occupancy_percent}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Expenses Tab */}
+      {activeTab === 'expenses' && expSummary && (
+        <div className="report-sections">
+          <div className="stats-grid">
+            <StatCard title="Total Expenses" value={`₹${(expSummary.total || 0).toLocaleString()}`} icon={Receipt} color="#ef4444" />
+          </div>
+          <div className="card" style={{ marginTop: '16px' }}>
+            <div className="card-header"><h3>Expense by Category</h3></div>
+            <div className="card-content">
+              {expSummary.byCategory?.map(cat => {
+                const maxCat = Math.max(...expSummary.byCategory.map(c => c.total));
+                return (
+                  <div key={cat.category} className="bar-chart-row">
+                    <span className="bar-label">{cat.category}</span>
+                    <div className="bar-container">
+                      <div className="bar-fill" style={{ width: `${(cat.total / maxCat) * 100}%`, backgroundColor: '#ef4444' }}></div>
+                    </div>
+                    <span className="bar-value">₹{cat.total.toLocaleString()} ({cat.count})</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div className="card" style={{ marginTop: '16px' }}>
+            <div className="card-header"><h3>Expense by Property</h3></div>
+            <div className="report-table">
+              <table>
+                <thead><tr><th>Property</th><th>Total Expenses</th></tr></thead>
+                <tbody>
+                  {expSummary.byProperty?.map(p => (
+                    <tr key={p.property_id}>
+                      <td>{p.property_name}</td>
+                      <td className="text-red">₹{p.total.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Guest Analytics Tab */}
+      {activeTab === 'guests' && guestAnalytics && (
+        <div className="report-sections">
+          <div className="stats-grid">
+            <StatCard title="Total Guests" value={guestAnalytics.total_guests} icon={Users} color="#6366f1" />
+            <StatCard title="New Guests" value={guestAnalytics.new_guests} icon={UserCheck} color="#10b981" />
+            <StatCard title="Repeat Guests" value={guestAnalytics.repeat_guests} icon={RefreshCw} color="#f59e0b" />
+            <StatCard title="Repeat Rate" value={`${guestAnalytics.repeat_rate}%`} icon={TrendingUp} color="#3b82f6" />
+          </div>
+          <div className="stats-grid" style={{ marginTop: '16px' }}>
+            <StatCard title="Avg Lifetime Value" value={`₹${guestAnalytics.avg_lifetime_value.toLocaleString()}`} icon={DollarSign} color="#8b5cf6" />
+          </div>
+          <div className="card" style={{ marginTop: '16px' }}>
+            <div className="card-header"><h3>Top Guests by Lifetime Value</h3></div>
+            <div className="report-table">
+              <table>
+                <thead><tr><th>#</th><th>Guest</th><th>Phone</th><th>Stays</th><th>Lifetime Value</th></tr></thead>
+                <tbody>
+                  {guestAnalytics.topGuests?.map((g, i) => (
+                    <tr key={g.id}>
+                      <td>{i + 1}</td>
+                      <td>{g.name}</td>
+                      <td>{g.phone}</td>
+                      <td>{g.total_stays}</td>
+                      <td className="profit">₹{g.lifetime_value.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Payment Summary Tab */}
+      {activeTab === 'payments' && paymentSummary && (
+        <div className="report-sections">
+          <div className="stats-grid">
+            <StatCard title="Paid Bookings" value={paymentSummary.paid.count} icon={CheckCircle} color="#10b981" />
+            <StatCard title="Paid Amount" value={`₹${paymentSummary.paid.total.toLocaleString()}`} icon={DollarSign} color="#10b981" />
+            <StatCard title="Pending Bookings" value={paymentSummary.pending.count} icon={Clock} color="#f59e0b" />
+            <StatCard title="Pending Amount" value={`₹${paymentSummary.pending.total.toLocaleString()}`} icon={AlertCircle} color="#ef4444" />
+          </div>
+          <div className="stats-grid" style={{ marginTop: '16px' }}>
+            <StatCard title="Partial Payments" value={paymentSummary.partial.count} icon={Clock} color="#8b5cf6" />
+            <StatCard title="Collected (Partial)" value={`₹${paymentSummary.partial.collected.toLocaleString()}`} icon={DollarSign} color="#6366f1" />
+            <StatCard title="Remaining (Partial)" value={`₹${paymentSummary.partial.remaining.toLocaleString()}`} icon={AlertCircle} color="#ef4444" />
+          </div>
+          <div className="card" style={{ marginTop: '16px' }}>
+            <div className="card-header"><h3>Collection Summary</h3></div>
+            <div className="card-content">
+              <div className="bar-chart-row">
+                <span className="bar-label">Collected</span>
+                <div className="bar-container">
+                  <div className="bar-fill" style={{ width: `${paymentSummary.total_collected / Math.max(1, paymentSummary.total_collected + paymentSummary.total_pending) * 100}%`, backgroundColor: '#10b981' }}></div>
+                </div>
+                <span className="bar-value">₹{paymentSummary.total_collected.toLocaleString()}</span>
+              </div>
+              <div className="bar-chart-row">
+                <span className="bar-label">Pending</span>
+                <div className="bar-container">
+                  <div className="bar-fill" style={{ width: `${paymentSummary.total_pending / Math.max(1, paymentSummary.total_collected + paymentSummary.total_pending) * 100}%`, backgroundColor: '#ef4444' }}></div>
+                </div>
+                <span className="bar-value">₹{paymentSummary.total_pending.toLocaleString()}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ADR Tab */}
+      {activeTab === 'adr' && adrData && (
+        <div className="report-sections">
+          <div className="stats-grid">
+            <StatCard title="Overall ADR" value={`₹${adrData.overall_adr.toLocaleString()}`} icon={TrendingUp} color="#6366f1" />
+          </div>
+          <div className="card" style={{ marginTop: '16px' }}>
+            <div className="card-header"><h3>Average Daily Rate by Property</h3></div>
+            <div className="report-table">
+              <table>
+                <thead><tr><th>Property</th><th>Base Price</th><th>Nights Sold</th><th>Total Revenue</th><th>ADR</th><th>vs Base</th></tr></thead>
+                <tbody>
+                  {adrData.properties?.map(p => (
+                    <tr key={p.property_id}>
+                      <td>{p.property_name}</td>
+                      <td>₹{p.base_price.toLocaleString()}</td>
+                      <td>{p.nights_sold}</td>
+                      <td>₹{p.total_revenue.toLocaleString()}</td>
+                      <td className="profit">₹{p.adr.toLocaleString()}</td>
+                      <td className={p.adr >= p.base_price ? 'text-green' : 'text-red'}>
+                        {p.base_price > 0 ? `${p.adr >= p.base_price ? '+' : ''}${Math.round((p.adr - p.base_price) / p.base_price * 100)}%` : 'N/A'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -987,7 +1501,7 @@ const Reports = () => {
 const Layout = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
-  
+
   const getActiveTab = () => {
     const path = location.pathname.replace(/^\/app\/?/, '').replace(/^\//, '') || 'dashboard';
     return path;
@@ -1001,6 +1515,9 @@ const Layout = () => {
         </button>
         <div className="topbar-title">Stay Nestura PMS</div>
         <div className="topbar-actions">
+          <a href="/" className="icon-btn" title="Back to Homepage">
+            <Home size={20} />
+          </a>
           <button className="icon-btn">
             <Bell size={20} />
             <span className="notification-badge">3</span>
@@ -1011,8 +1528,8 @@ const Layout = () => {
         </div>
       </header>
 
-      <Sidebar 
-        isOpen={sidebarOpen} 
+      <Sidebar
+        isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         activeTab={getActiveTab()}
         setActiveTab={() => {}}

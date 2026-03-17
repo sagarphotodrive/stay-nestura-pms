@@ -6,7 +6,8 @@
       "Bash(winget install:*)",
       "Bash(where choco:*)",
       "Bash(where docker:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(gh:*)"
     ]
   }
 }

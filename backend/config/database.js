@@ -54,6 +54,11 @@ const store = {
     { id: 2, channel: 'booking.com', sync_type: 'full', status: 'success', records_processed: 180, errors: null, started_at: new Date(Date.now() - 3600000).toISOString(), completed_at: new Date(Date.now() - 3400000).toISOString() },
   ],
 
+  ical_links: [
+    { id: 1, property_id: 1, channel: 'airbnb', ical_url: '', label: 'Airbnb - Torna Homestay', created_at: '2024-01-15T00:00:00Z' },
+    { id: 2, property_id: 1, channel: 'booking.com', ical_url: '', label: 'Booking.com - Torna Homestay', created_at: '2024-01-15T00:00:00Z' },
+    { id: 3, property_id: 2, channel: 'airbnb', ical_url: '', label: 'Airbnb - Shivneri Homestay', created_at: '2024-01-20T00:00:00Z' },
+  ],
   messages: [],
   users: [{ id: 'demo-001', email: 'test@test.com', password_hash: '', name: 'Demo User', role: 'admin', created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' }],
 };

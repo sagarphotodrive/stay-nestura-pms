@@ -121,14 +121,40 @@ app.get('/api/bookings', (req, res) => {
   const page = parseInt(req.query.page) || 1; const limit = parseInt(req.query.limit) || 20;
   res.json({ bookings: enriched.slice((page-1)*limit, page*limit), total: enriched.length, page, pages: Math.ceil(enriched.length/limit) });
 });
+app.get('/api/bookings/check-availability', (req, res) => {
+  const { property_id, check_in, check_out } = req.query;
+  if (!property_id || !check_in || !check_out) return res.json({ available: true, conflicts: [] });
+  const conflicts = store.bookings.filter(b =>
+    b.property_id == property_id && b.booking_status !== 'cancelled' &&
+    b.check_in < check_out && b.check_out > check_in
+  ).map(b => {
+    const g = store.guests.find(gs => gs.id === b.guest_id) || {};
+    return { id: b.id, guest_name: `${g.first_name || ''} ${g.last_name || ''}`.trim(), check_in: b.check_in, check_out: b.check_out, channel: b.channel };
+  });
+  res.json({ available: conflicts.length === 0, conflicts });
+});
 app.post('/api/bookings', (req, res) => {
   const b = req.body;
+  // Guest dedup: match on (first_name + last_name + phone + email)
+  let guestId = b.guest_id ? parseInt(b.guest_id) : null;
+  if (!guestId && (b.first_name || b.phone)) {
+    const key = [(b.first_name||'').trim().toLowerCase(), (b.last_name||'').trim().toLowerCase(), (b.phone||'').trim(), (b.email||'').trim().toLowerCase()].join('|');
+    let guest = store.guests.find(g => {
+      const gKey = [(g.first_name||'').trim().toLowerCase(), (g.last_name||'').trim().toLowerCase(), (g.phone||'').trim(), (g.email||'').trim().toLowerCase()].join('|');
+      return gKey === key;
+    });
+    if (!guest) {
+      guest = { id: _nextId(), first_name: (b.first_name||'').trim(), last_name: (b.last_name||'').trim(), email: (b.email||'').trim(), phone: (b.phone||'').trim(), id_proof_type: null, id_proof_number: null, id_proof_encrypted: null, address: '', date_of_birth: null, nationality: 'Indian', total_stays: 0, total_spent: 0, lifetime_value: 0, preferences: '', notes: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+      store.guests.push(guest);
+    }
+    guestId = guest.id;
+  }
   const nights = Math.max(1, Math.ceil((new Date(b.check_out) - new Date(b.check_in)) / 86400000));
   const subtotal = (b.nightly_rate || 0) * nights;
   const gross = (b.gross_amount || subtotal + (b.cleaning_fee||0) + (b.service_fee||0) + (b.taxes||0));
   const commPct = b.channel === 'airbnb' ? 3 : b.channel === 'booking.com' ? 15 : 0;
   const commAmt = Math.round(gross * commPct / 100);
-  const booking = { id: _nextId(), property_id: parseInt(b.property_id), guest_id: parseInt(b.guest_id), channel: b.channel || 'direct', channel_booking_id: b.channel_booking_id, check_in: b.check_in, check_out: b.check_out, adults: b.adults || 1, children: b.children || 0, infants: b.infants || 0, nightly_rate: b.nightly_rate || 0, subtotal, cleaning_fee: b.cleaning_fee || 0, service_fee: b.service_fee || 0, taxes: b.taxes || 0, gross_amount: gross, commission_percent: commPct, commission_amount: commAmt, net_amount: gross - commAmt, currency: 'INR', payment_status: b.payment_status || 'pending', payment_method: b.payment_method, paid_amount: b.paid_amount || 0, pending_amount: gross - (b.paid_amount || 0), booking_status: 'confirmed', guest_message: b.guest_message || '', special_requests: b.special_requests || '', check_in_time: b.check_in_time || '2:00 PM', check_out_time: b.check_out_time || '11:00 AM', actual_check_in: null, actual_check_out: null, confirmed_at: new Date().toISOString(), cancelled_at: null, cancellation_reason: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+  const booking = { id: _nextId(), property_id: parseInt(b.property_id), guest_id: guestId, channel: b.channel || 'direct', channel_booking_id: b.channel_booking_id, check_in: b.check_in, check_out: b.check_out, adults: b.adults || 1, children: b.children || 0, infants: b.infants || 0, nightly_rate: b.nightly_rate || 0, subtotal, cleaning_fee: b.cleaning_fee || 0, service_fee: b.service_fee || 0, taxes: b.taxes || 0, gross_amount: gross, commission_percent: commPct, commission_amount: commAmt, net_amount: gross - commAmt, currency: 'INR', payment_status: b.payment_status || 'pending', payment_method: b.payment_method, paid_amount: b.paid_amount || 0, pending_amount: gross - (b.paid_amount || 0), booking_status: 'confirmed', guest_message: b.guest_message || '', special_requests: b.special_requests || '', check_in_time: b.check_in_time || '2:00 PM', check_out_time: b.check_out_time || '11:00 AM', actual_check_in: null, actual_check_out: null, confirmed_at: new Date().toISOString(), cancelled_at: null, cancellation_reason: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
   store.bookings.push(booking);
   const g = store.guests.find(gs => gs.id === booking.guest_id);
   if (g) { g.total_stays++; g.total_spent += booking.net_amount; g.lifetime_value += booking.net_amount; }
@@ -285,6 +311,60 @@ app.get('/api/reports/revenue', (req, res) => {
   const byMonth = {}; bks.forEach(b => { const m = b.check_in.substring(0,7); if (!byMonth[m]) byMonth[m] = { month: m, bookings: 0, gross: 0, net: 0 }; byMonth[m].bookings++; byMonth[m].gross += b.gross_amount; byMonth[m].net += b.net_amount; });
   const byProperty = {}; bks.forEach(b => { const pn = (store.properties.find(p => p.id === b.property_id)||{}).name || 'Unknown'; if (!byProperty[pn]) byProperty[pn] = { property_name: pn, bookings: 0, gross: 0, net: 0 }; byProperty[pn].bookings++; byProperty[pn].gross += b.gross_amount; byProperty[pn].net += b.net_amount; });
   res.json({ byChannel: Object.values(byChannel), byMonth: Object.values(byMonth), byProperty: Object.values(byProperty) });
+});
+
+// --- REPORT EXTRAS ---
+app.get('/api/reports/guest-analytics', (req, res) => {
+  const gs = store.guests;
+  const newGuests = gs.filter(g => g.total_stays <= 1);
+  const repeatGuests = gs.filter(g => g.total_stays > 1);
+  const topGuests = [...gs].sort((a,b) => b.lifetime_value - a.lifetime_value).slice(0, 10).map(g => ({ id: g.id, name: `${g.first_name} ${g.last_name}`, phone: g.phone, total_stays: g.total_stays, lifetime_value: g.lifetime_value }));
+  res.json({ total_guests: gs.length, new_guests: newGuests.length, repeat_guests: repeatGuests.length, repeat_rate: gs.length ? Math.round(repeatGuests.length / gs.length * 100) : 0, topGuests, avg_lifetime_value: gs.length ? Math.round(gs.reduce((s,g) => s + g.lifetime_value, 0) / gs.length) : 0 });
+});
+app.get('/api/reports/payment-summary', (req, res) => {
+  const bks = store.bookings.filter(b => b.booking_status !== 'cancelled');
+  const paid = bks.filter(b => b.payment_status === 'paid');
+  const pending = bks.filter(b => b.payment_status === 'pending');
+  const partial = bks.filter(b => b.payment_status === 'partial');
+  res.json({
+    paid: { count: paid.length, total: paid.reduce((s,b) => s + b.gross_amount, 0) },
+    pending: { count: pending.length, total: pending.reduce((s,b) => s + b.gross_amount, 0) },
+    partial: { count: partial.length, total: partial.reduce((s,b) => s + b.gross_amount, 0), collected: partial.reduce((s,b) => s + b.paid_amount, 0), remaining: partial.reduce((s,b) => s + b.pending_amount, 0) },
+    total_collected: bks.reduce((s,b) => s + b.paid_amount, 0),
+    total_pending: bks.reduce((s,b) => s + b.pending_amount, 0)
+  });
+});
+app.get('/api/reports/adr', (req, res) => {
+  const bks = store.bookings.filter(b => b.booking_status !== 'cancelled');
+  const props = store.properties.filter(p => p.is_active).map(p => {
+    const pb = bks.filter(b => b.property_id === p.id);
+    const totalRevenue = pb.reduce((s,b) => s + b.net_amount, 0);
+    const totalNights = pb.reduce((s,b) => s + Math.max(1, Math.ceil((new Date(b.check_out) - new Date(b.check_in)) / 86400000)), 0);
+    return { property_id: p.id, property_name: p.name, total_revenue: totalRevenue, nights_sold: totalNights, adr: totalNights > 0 ? Math.round(totalRevenue / totalNights) : 0, base_price: p.base_price };
+  });
+  const totalRev = props.reduce((s,p) => s + p.total_revenue, 0);
+  const totalNights = props.reduce((s,p) => s + p.nights_sold, 0);
+  res.json({ properties: props, overall_adr: totalNights > 0 ? Math.round(totalRev / totalNights) : 0 });
+});
+
+// --- ICAL LINKS ---
+app.get('/api/ical-links', (req, res) => {
+  let links = store.ical_links || [];
+  if (req.query.property_id) links = links.filter(l => l.property_id == req.query.property_id);
+  res.json(links);
+});
+app.post('/api/ical-links', (req, res) => {
+  const b = req.body;
+  if (!store.ical_links) store.ical_links = [];
+  const link = { id: _nextId(), property_id: parseInt(b.property_id), channel: b.channel || 'other', ical_url: b.ical_url || '', label: b.label || b.channel || 'Calendar Link', created_at: new Date().toISOString() };
+  store.ical_links.push(link);
+  res.status(201).json(link);
+});
+app.delete('/api/ical-links/:id', (req, res) => {
+  if (!store.ical_links) store.ical_links = [];
+  const idx = store.ical_links.findIndex(l => l.id == req.params.id);
+  if (idx >= 0) store.ical_links.splice(idx, 1);
+  res.json({ message: 'Deleted' });
 });
 
 // --- CHANNEL MANAGER ---

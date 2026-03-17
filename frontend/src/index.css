@@ -645,89 +645,129 @@ a {
 .master-calendar {
   background: var(--bg-secondary);
   border-radius: var(--radius-lg);
-  border: 1px solid var(--border);
-  overflow: hidden;
+  border: 2px solid var(--border);
+  overflow-x: auto;
+  overflow-y: visible;
 }
 
 .calendar-header {
   display: flex;
-  background: var(--bg-tertiary);
-  border-bottom: 1px solid var(--border);
+  background: #1e293b;
+  border-bottom: 2px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 
 .calendar-body .calendar-row {
   display: flex;
-  border-bottom: 1px solid var(--border-light);
+  border-bottom: 1px solid var(--border);
+}
+.calendar-body .calendar-row:nth-child(even) {
+  background: rgba(255,255,255,0.02);
 }
 
 .calendar-body .calendar-row:last-child {
   border-bottom: none;
 }
+.calendar-body .calendar-row:hover {
+  background: rgba(99, 102, 241, 0.05);
+}
 
 .property-col {
-  width: 160px;
-  min-width: 160px;
+  width: 180px;
+  min-width: 180px;
   padding: 0.75rem 1rem;
-  font-weight: 500;
-  font-size: 0.875rem;
-  border-right: 1px solid var(--border-light);
+  font-weight: 600;
+  font-size: 0.85rem;
+  border-right: 2px solid var(--border);
   display: flex;
   align-items: center;
+  color: #e2e8f0;
+  background: rgba(30, 41, 59, 0.5);
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+
+.calendar-header .property-col {
+  background: #1e293b;
+  color: #94a3b8;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .day-col {
   flex: 1;
-  min-width: 40px;
+  min-width: 44px;
   padding: 0.5rem 0.25rem;
   text-align: center;
   font-size: 0.75rem;
+  border-right: 1px solid rgba(255,255,255,0.04);
 }
 
 .day-col.weekend {
-  background: var(--bg-tertiary);
+  background: rgba(239, 68, 68, 0.05);
 }
 
 .day-name {
   display: block;
-  color: var(--text-secondary);
-  font-size: 0.625rem;
+  color: #64748b;
+  font-size: 0.65rem;
   text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
 }
 
 .day-num {
   display: block;
-  font-weight: 600;
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: #e2e8f0;
 }
 
 .day-cell {
   flex: 1;
-  min-width: 40px;
-  height: 48px;
-  border-right: 1px solid var(--border-light);
+  min-width: 44px;
+  height: 52px;
+  border-right: 1px solid rgba(255,255,255,0.04);
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: background 0.15s;
 }
 
 .day-cell.booked {
-  background: rgba(16, 185, 129, 0.1);
+  background: rgba(16, 185, 129, 0.18);
+  border-right-color: rgba(16, 185, 129, 0.15);
+}
+
+.day-cell.booked.today {
+  background: rgba(99, 102, 241, 0.25);
 }
 
 .day-cell.today {
-  background: rgba(59, 130, 246, 0.1);
+  background: rgba(59, 130, 246, 0.15);
+  box-shadow: inset 0 0 0 2px rgba(59, 130, 246, 0.4);
 }
 
 .booking-badge {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   background: var(--success);
   color: white;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.75rem;
-  font-weight: 600;
+  font-size: 0.8rem;
+  font-weight: 700;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  transition: transform 0.15s;
+}
+.day-cell.booked:hover .booking-badge {
+  transform: scale(1.15);
 }
 
 .calendar-legend {
@@ -753,16 +793,18 @@ a {
 }
 
 .legend-color.available {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.05);
+  border: 2px solid rgba(255,255,255,0.15);
 }
 
 .legend-color.booked {
-  background: rgba(16, 185, 129, 0.3);
+  background: rgba(16, 185, 129, 0.35);
+  border: 2px solid rgba(16, 185, 129, 0.5);
 }
 
 .legend-color.today {
-  background: rgba(59, 130, 246, 0.3);
+  background: rgba(59, 130, 246, 0.35);
+  border: 2px solid rgba(59, 130, 246, 0.5);
 }
 
 /* Filters */
@@ -1397,4 +1439,118 @@ a {
 @media (max-width: 640px) {
   .modal-form .form-row { flex-direction: column; }
   .modal-content { max-width: 100%; margin: 10px; }
+}
+
+/* Booking Detail Modal */
+.booking-detail-modal { padding: 20px; }
+.booking-detail-modal .detail-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.booking-detail-modal .detail-row:last-child { border-bottom: none; }
+.booking-detail-modal .detail-label { color: #9ca3af; font-size: 14px; }
+.booking-detail-modal .detail-value { color: #fff; font-weight: 500; }
+
+/* Availability Indicator */
+.availability-indicator {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; border-radius: 8px; font-size: 13px; font-weight: 500;
+}
+.availability-indicator.available { background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); }
+.availability-indicator.conflict { background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); }
+
+/* Modal large variant */
+.modal-large { max-width: 700px; }
+
+/* iCal Links Section */
+.ical-section {
+  margin-top: 24px; background: var(--bg-secondary); border-radius: var(--radius);
+  border: 1px solid var(--border); overflow: hidden;
+}
+.ical-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 16px 20px; background: rgba(99, 102, 241, 0.05);
+}
+.ical-header h3 { display: flex; align-items: center; gap: 8px; font-size: 16px; }
+.ical-content { padding: 16px 20px; }
+.ical-property { margin-bottom: 16px; }
+.ical-property h4 { font-size: 14px; font-weight: 600; margin-bottom: 8px; color: var(--info); }
+.ical-links-list { display: flex; flex-direction: column; gap: 6px; }
+.ical-link-item {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  background: rgba(255,255,255,0.03); border-radius: 6px; border: 1px solid rgba(255,255,255,0.06);
+}
+.channel-tag {
+  font-size: 11px; font-weight: 600; text-transform: uppercase; padding: 2px 8px;
+  border-radius: 4px; background: rgba(255,255,255,0.1); color: #9ca3af;
+}
+.channel-tag.airbnb { background: rgba(255, 90, 95, 0.15); color: #ff5a5f; }
+.channel-tag.booking\.com { background: rgba(0, 53, 128, 0.15); color: #4a9fff; }
+.channel-tag.agoda { background: rgba(233, 69, 96, 0.15); color: #e94560; }
+.channel-tag.makemytrip { background: rgba(0, 79, 189, 0.15); color: #4a9fff; }
+.ical-label { flex: 1; font-size: 13px; color: var(--text-secondary); }
+.ical-url-link { color: var(--info); display: flex; }
+.btn-icon-sm { background: none; border: none; color: #9ca3af; cursor: pointer; padding: 4px; display: flex; }
+.btn-icon-sm:hover { color: #ef4444; }
+.empty-state-sm { font-size: 13px; color: #6b7280; padding: 4px 0; }
+.ical-add-form { border-top: 1px solid rgba(255,255,255,0.06); padding-top: 16px; margin-top: 16px; }
+.ical-add-form h4 { font-size: 14px; margin-bottom: 12px; }
+.ical-add-form .form-row { display: flex; gap: 12px; margin-bottom: 12px; }
+.ical-add-form .form-group { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.ical-add-form .form-group label { font-size: 12px; color: #9ca3af; }
+.ical-add-form .form-group input,
+.ical-add-form .form-group select {
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px; padding: 8px 10px; color: #fff; font-size: 13px;
+}
+
+/* Report Tabs */
+.report-tabs {
+  display: flex; gap: 4px; margin-bottom: 20px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0;
+}
+.report-tab {
+  padding: 10px 18px; border: none; background: none; color: var(--text-secondary);
+  font-size: 14px; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+}
+.report-tab:hover { color: var(--info); }
+.report-tab.active { color: var(--info); border-bottom-color: var(--info); }
+
+/* Report Sections */
+.report-sections { display: flex; flex-direction: column; gap: 0; }
+
+/* Bar Chart Rows */
+.bar-chart-row {
+  display: flex; align-items: center; gap: 12px; padding: 8px 0;
+}
+.bar-label { width: 120px; font-size: 13px; color: var(--text-secondary); flex-shrink: 0; text-transform: capitalize; }
+.bar-container { flex: 1; height: 24px; background: rgba(255,255,255,0.05); border-radius: 4px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; min-width: 2px; }
+.bar-value { width: 100px; text-align: right; font-size: 13px; font-weight: 500; flex-shrink: 0; }
+
+/* Text Colors */
+.text-red { color: #ef4444; }
+.text-green { color: #10b981; }
+.profit { color: #10b981; font-weight: 600; }
+
+/* Report Table Enhancements */
+.report-table table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.report-table th { text-align: left; padding: 12px 16px; background: rgba(255,255,255,0.03); color: #9ca3af; font-weight: 500; font-size: 13px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+.report-table td { padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+
+/* Day cell pointer on calendar */
+.day-cell.booked { cursor: pointer; }
+.day-cell.booked:hover { opacity: 0.8; }
+.day-cell.available-click { cursor: pointer; }
+.day-cell.available-click:hover { background: rgba(99, 102, 241, 0.12); }
+.empty-cell-plus {
+  width: 22px; height: 22px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 700; color: rgba(255,255,255,0.1);
+  transition: all 0.15s;
+}
+.day-cell.available-click:hover .empty-cell-plus {
+  color: #6366f1; background: rgba(99, 102, 241, 0.15);
 }

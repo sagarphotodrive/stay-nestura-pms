@@ -5,8 +5,12 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "build": "cd frontend && npm install && npm run build",
     "dev": "nodemon server.js",
     "db:init": "node backend/scripts/initDb.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "dependencies": {
     "express": "^4.18.2",
