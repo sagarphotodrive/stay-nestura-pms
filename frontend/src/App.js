@@ -8,7 +8,7 @@ import {
   Receipt, BarChart3, Settings, Bell, Menu, X,
   Plus, Search, ChevronRight, Home, LogOut,
   RefreshCw, DollarSign, TrendingUp, UserCheck,
-  UserX, AlertCircle, CheckCircle, Clock, Link2, Trash2, ExternalLink
+  UserX, AlertCircle, CheckCircle, Clock, Link2, Trash2, ExternalLink, Edit3
 } from 'lucide-react';
 
 // API Configuration
@@ -296,31 +296,31 @@ const Properties = () => {
   const [properties, setProperties] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: '', property_type: 'Homestay', address: '', city: '', state: 'Maharashtra', pincode: '', total_rooms: 1, max_guests: 2, base_price: '', description: '' });
+  const [editId, setEditId] = useState(null);
+  const emptyForm = { name: '', property_type: 'Homestay', address: '', city: '', state: 'Maharashtra', pincode: '', total_rooms: 1, max_guests: 2, base_price: '', description: '' };
+  const [form, setForm] = useState(emptyForm);
 
-  useEffect(() => {
-    fetchProperties();
-  }, []);
+  useEffect(() => { fetchProperties(); }, []);
 
   const fetchProperties = async () => {
-    try {
-      const res = await api.get('/properties');
-      setProperties(res.data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+    try { const res = await api.get('/properties'); setProperties(res.data); } catch (err) { console.error(err); } finally { setLoading(false); }
   };
+
+  const openAdd = () => { setEditId(null); setForm(emptyForm); setShowForm(true); };
+  const openEdit = (p) => { setEditId(p.id); setForm({ name: p.name, property_type: p.property_type, address: p.address, city: p.city, state: p.state, pincode: p.pincode, total_rooms: p.total_rooms, max_guests: p.max_guests, base_price: p.base_price, description: p.description || '' }); setShowForm(true); };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const data = { ...form, base_price: parseFloat(form.base_price), total_rooms: parseInt(form.total_rooms), max_guests: parseInt(form.max_guests) };
     try {
-      await api.post('/properties', { ...form, base_price: parseFloat(form.base_price), total_rooms: parseInt(form.total_rooms), max_guests: parseInt(form.max_guests) });
-      setShowForm(false);
-      setForm({ name: '', property_type: 'Homestay', address: '', city: '', state: 'Maharashtra', pincode: '', total_rooms: 1, max_guests: 2, base_price: '', description: '' });
-      fetchProperties();
+      if (editId) { await api.put(`/properties/${editId}`, data); } else { await api.post('/properties', data); }
+      setShowForm(false); setForm(emptyForm); setEditId(null); fetchProperties();
     } catch (err) { console.error(err); }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Deactivate this property?')) return;
+    try { await api.delete(`/properties/${id}`); fetchProperties(); } catch (err) { console.error(err); }
   };
 
   if (loading) return <LoadingSpinner />;
@@ -329,16 +329,13 @@ const Properties = () => {
     <div className="properties-page">
       <div className="page-header">
         <h1>Properties</h1>
-        <button className="btn btn-primary" onClick={() => setShowForm(true)}>
-          <Plus size={18} />
-          Add Property
-        </button>
+        <button className="btn btn-primary" onClick={openAdd}><Plus size={18} /> Add Property</button>
       </div>
 
       {showForm && (
         <div className="modal-overlay" onClick={() => setShowForm(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <div className="modal-header"><h2>Add New Property</h2><button className="modal-close" onClick={() => setShowForm(false)}><X size={20}/></button></div>
+            <div className="modal-header"><h2>{editId ? 'Edit Property' : 'Add New Property'}</h2><button className="modal-close" onClick={() => setShowForm(false)}><X size={20}/></button></div>
             <form onSubmit={handleSubmit} className="modal-form">
               <div className="form-group"><label>Property Name *</label><input required value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="e.g. Sunset Homestay"/></div>
               <div className="form-row">
@@ -356,7 +353,7 @@ const Properties = () => {
                 <div className="form-group"><label>Max Guests</label><input type="number" min="1" value={form.max_guests} onChange={e => setForm({...form, max_guests: e.target.value})}/></div>
               </div>
               <div className="form-group"><label>Description</label><textarea value={form.description} onChange={e => setForm({...form, description: e.target.value})} placeholder="Describe the property" rows="3"/></div>
-              <div className="form-actions"><button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>Cancel</button><button type="submit" className="btn btn-primary">Add Property</button></div>
+              <div className="form-actions"><button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>Cancel</button><button type="submit" className="btn btn-primary">{editId ? 'Save Changes' : 'Add Property'}</button></div>
             </form>
           </div>
         </div>
@@ -367,6 +364,10 @@ const Properties = () => {
           <div key={property.id} className="property-card">
             <div className="property-image">
               <Building2 size={40} />
+              <div className="card-actions">
+                <button className="btn-icon-sm" onClick={() => openEdit(property)} title="Edit"><Edit3 size={14} /></button>
+                <button className="btn-icon-sm" onClick={() => handleDelete(property.id)} title="Delete"><Trash2 size={14} /></button>
+              </div>
             </div>
             <div className="property-info">
               <h3>{property.name}</h3>
@@ -672,9 +673,11 @@ const Bookings = () => {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState(null);
   const [properties, setProperties] = useState([]);
   const [availabilityStatus, setAvailabilityStatus] = useState(null);
-  const [bForm, setBForm] = useState({ property_id: '', first_name: '', last_name: '', phone: '', email: '', check_in: '', check_out: '', adults: 1, children: 0, nightly_rate: '', channel: 'direct', payment_method: 'UPI', special_requests: '' });
+  const emptyBForm = { property_id: '', first_name: '', last_name: '', phone: '', email: '', check_in: '', check_out: '', adults: 1, children: 0, nightly_rate: '', channel: 'direct', payment_method: 'UPI', special_requests: '' };
+  const [bForm, setBForm] = useState(emptyBForm);
 
   // Auto-open prefilled form from calendar click
   useEffect(() => {
@@ -732,29 +735,35 @@ const Bookings = () => {
     try {
       const pRes = await api.get('/properties');
       setProperties(pRes.data || []);
+      setEditId(null);
       setShowForm(true);
     } catch (err) { console.error(err); }
   };
 
+  const openEdit = async (b) => {
+    try {
+      const pRes = await api.get('/properties');
+      setProperties(pRes.data || []);
+    } catch (err) {}
+    setEditId(b.id);
+    setBForm({ property_id: String(b.property_id), first_name: b.first_name || '', last_name: b.last_name || '', phone: b.phone || '', email: b.email || '', check_in: b.check_in, check_out: b.check_out, adults: b.adults || 1, children: b.children || 0, nightly_rate: b.nightly_rate || '', channel: b.channel || 'direct', payment_method: b.payment_method || 'UPI', special_requests: b.special_requests || '' });
+    setShowForm(true);
+  };
+
   const handleBooking = async (e) => {
     e.preventDefault();
-    if (availabilityStatus && !availabilityStatus.available) {
+    if (!editId && availabilityStatus && !availabilityStatus.available) {
       alert('Cannot create booking: dates conflict with an existing booking.');
       return;
     }
     try {
       const nights = Math.max(1, Math.ceil((new Date(bForm.check_out) - new Date(bForm.check_in)) / 86400000));
       const gross = parseFloat(bForm.nightly_rate) * nights;
-      await api.post('/bookings', {
-        ...bForm,
-        property_id: parseInt(bForm.property_id),
-        nightly_rate: parseFloat(bForm.nightly_rate),
-        gross_amount: gross,
-        adults: parseInt(bForm.adults),
-        children: parseInt(bForm.children)
-      });
+      const data = { ...bForm, property_id: parseInt(bForm.property_id), nightly_rate: parseFloat(bForm.nightly_rate), gross_amount: gross, adults: parseInt(bForm.adults), children: parseInt(bForm.children) };
+      if (editId) { await api.put(`/bookings/${editId}`, data); } else { await api.post('/bookings', data); }
       setShowForm(false);
-      setBForm({ property_id: '', first_name: '', last_name: '', phone: '', email: '', check_in: '', check_out: '', adults: 1, children: 0, nightly_rate: '', channel: 'direct', payment_method: 'UPI', special_requests: '' });
+      setBForm(emptyBForm);
+      setEditId(null);
       setAvailabilityStatus(null);
       fetchBookings();
     } catch (err) { console.error(err); }
@@ -784,7 +793,7 @@ const Bookings = () => {
       {showForm && (
         <div className="modal-overlay" onClick={() => setShowForm(false)}>
           <div className="modal-content modal-large" onClick={e => e.stopPropagation()}>
-            <div className="modal-header"><h2>New Booking</h2><button className="modal-close" onClick={() => setShowForm(false)}><X size={20}/></button></div>
+            <div className="modal-header"><h2>{editId ? 'Edit Booking' : 'New Booking'}</h2><button className="modal-close" onClick={() => setShowForm(false)}><X size={20}/></button></div>
             <form onSubmit={handleBooking} className="modal-form">
               <div className="form-group"><label>Property *</label><select required value={bForm.property_id} onChange={e => { const p = properties.find(pr => pr.id === parseInt(e.target.value)); setBForm({...bForm, property_id: e.target.value, nightly_rate: p ? p.base_price : bForm.nightly_rate}); }}><option value="">Select property</option>{properties.map(p => <option key={p.id} value={p.id}>{p.name} - ₹{p.base_price}/night</option>)}</select></div>
 
@@ -827,7 +836,7 @@ const Bookings = () => {
               <div className="form-group"><label>Special Requests</label><textarea value={bForm.special_requests} onChange={e => setBForm({...bForm, special_requests: e.target.value})} rows="2" placeholder="Any special requests..."/></div>
               <div className="form-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary" disabled={availabilityStatus && !availabilityStatus.available}>Create Booking</button>
+                <button type="submit" className="btn btn-primary" disabled={!editId && availabilityStatus && !availabilityStatus.available}>{editId ? 'Save Changes' : 'Create Booking'}</button>
               </div>
             </form>
           </div>
@@ -879,6 +888,7 @@ const Bookings = () => {
               <span className={`status-badge ${booking.booking_status}`}>
                 {booking.booking_status}
               </span>
+              <button className="btn btn-sm btn-edit" onClick={() => openEdit(booking)}><Edit3 size={14} /> Edit</button>
               {booking.booking_status === 'confirmed' && (
                 <button className="btn btn-sm" onClick={() => updateStatus(booking.id, 'checked-in')}>
                   Check In
@@ -888,6 +898,9 @@ const Bookings = () => {
                 <button className="btn btn-sm" onClick={() => updateStatus(booking.id, 'checked-out')}>
                   Check Out
                 </button>
+              )}
+              {booking.booking_status !== 'cancelled' && (
+                <button className="btn btn-sm btn-danger" onClick={() => { if(window.confirm('Cancel this booking?')) updateStatus(booking.id, 'cancelled'); }}>Cancel</button>
               )}
             </div>
           </div>
@@ -903,31 +916,24 @@ const Guests = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
-  const [gForm, setGForm] = useState({ first_name: '', last_name: '', email: '', phone: '', address: '', nationality: 'Indian', id_proof_type: 'Aadhaar', id_proof_number: '', notes: '' });
+  const [editId, setEditId] = useState(null);
+  const emptyGForm = { first_name: '', last_name: '', email: '', phone: '', address: '', nationality: 'Indian', id_proof_type: 'Aadhaar', id_proof_number: '', notes: '' };
+  const [gForm, setGForm] = useState(emptyGForm);
 
-  useEffect(() => {
-    fetchGuests();
-  }, [search]);
+  useEffect(() => { fetchGuests(); }, [search]);
 
   const fetchGuests = async () => {
-    try {
-      const params = search ? { search } : {};
-      const res = await api.get('/guests', { params });
-      setGuests(res.data.guests || []);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+    try { const params = search ? { search } : {}; const res = await api.get('/guests', { params }); setGuests(res.data.guests || []); } catch (err) { console.error(err); } finally { setLoading(false); }
   };
+
+  const openAdd = () => { setEditId(null); setGForm(emptyGForm); setShowForm(true); };
+  const openEdit = (g) => { setEditId(g.id); setGForm({ first_name: g.first_name, last_name: g.last_name, email: g.email || '', phone: g.phone, address: g.address || '', nationality: g.nationality || 'Indian', id_proof_type: g.id_proof_type || 'Aadhaar', id_proof_number: g.id_proof_number || '', notes: g.notes || '' }); setShowForm(true); };
 
   const handleGuest = async (e) => {
     e.preventDefault();
     try {
-      await api.post('/guests', gForm);
-      setShowForm(false);
-      setGForm({ first_name: '', last_name: '', email: '', phone: '', address: '', nationality: 'Indian', id_proof_type: 'Aadhaar', id_proof_number: '', notes: '' });
-      fetchGuests();
+      if (editId) { await api.put(`/guests/${editId}`, gForm); } else { await api.post('/guests', gForm); }
+      setShowForm(false); setGForm(emptyGForm); setEditId(null); fetchGuests();
     } catch (err) { console.error(err); }
   };
 
@@ -937,7 +943,7 @@ const Guests = () => {
     <div className="guests-page">
       <div className="page-header">
         <h1>Guests</h1>
-        <button className="btn btn-primary" onClick={() => setShowForm(true)}>
+        <button className="btn btn-primary" onClick={openAdd}>
           <Plus size={18} />
           Add Guest
         </button>
@@ -946,7 +952,7 @@ const Guests = () => {
       {showForm && (
         <div className="modal-overlay" onClick={() => setShowForm(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <div className="modal-header"><h2>Add Guest</h2><button className="modal-close" onClick={() => setShowForm(false)}><X size={20}/></button></div>
+            <div className="modal-header"><h2>{editId ? 'Edit Guest' : 'Add Guest'}</h2><button className="modal-close" onClick={() => setShowForm(false)}><X size={20}/></button></div>
             <form onSubmit={handleGuest} className="modal-form">
               <div className="form-row">
                 <div className="form-group"><label>First Name *</label><input required value={gForm.first_name} onChange={e => setGForm({...gForm, first_name: e.target.value})} placeholder="First name"/></div>
@@ -963,7 +969,7 @@ const Guests = () => {
                 <div className="form-group"><label>Nationality</label><input value={gForm.nationality} onChange={e => setGForm({...gForm, nationality: e.target.value})}/></div>
               </div>
               <div className="form-group"><label>Notes</label><textarea value={gForm.notes} onChange={e => setGForm({...gForm, notes: e.target.value})} rows="2" placeholder="Any notes about the guest"/></div>
-              <div className="form-actions"><button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>Cancel</button><button type="submit" className="btn btn-primary">Add Guest</button></div>
+              <div className="form-actions"><button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>Cancel</button><button type="submit" className="btn btn-primary">{editId ? 'Save Changes' : 'Add Guest'}</button></div>
             </form>
           </div>
         </div>
@@ -982,8 +988,9 @@ const Guests = () => {
       <div className="guests-grid">
         {guests.map(guest => (
           <div key={guest.id} className="guest-card">
-            <div className="guest-avatar">
+            <div className="guest-avatar" style={{ position: 'relative' }}>
               {guest.first_name?.[0]}{guest.last_name?.[0]}
+              <button className="btn-icon-sm card-edit-btn" onClick={() => openEdit(guest)} title="Edit"><Edit3 size={12} /></button>
             </div>
             <div className="guest-info">
               <h3>{guest.first_name} {guest.last_name}</h3>
@@ -1013,8 +1020,10 @@ const Expenses = () => {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState(null);
   const [properties, setProperties] = useState([]);
-  const [eForm, setEForm] = useState({ property_id: '', category: 'cleaning', description: '', amount: '', payment_method: 'cash', vendor_name: '', expense_date: new Date().toISOString().split('T')[0] });
+  const emptyEForm = { property_id: '', category: 'cleaning', description: '', amount: '', payment_method: 'cash', vendor_name: '', expense_date: new Date().toISOString().split('T')[0] };
+  const [eForm, setEForm] = useState(emptyEForm);
 
   useEffect(() => {
     fetchExpenses();
@@ -1037,17 +1046,28 @@ const Expenses = () => {
 
   const openExpForm = async () => {
     try { const res = await api.get('/properties'); setProperties(res.data || []); } catch(e) {}
+    setEditId(null); setEForm(emptyEForm); setShowForm(true);
+  };
+
+  const openEditExp = async (exp) => {
+    try { const res = await api.get('/properties'); setProperties(res.data || []); } catch(e) {}
+    setEditId(exp.id);
+    setEForm({ property_id: String(exp.property_id), category: exp.category, description: exp.description, amount: exp.amount, payment_method: exp.payment_method || 'cash', vendor_name: exp.vendor_name || '', expense_date: exp.expense_date });
     setShowForm(true);
   };
 
   const handleExpense = async (e) => {
     e.preventDefault();
     try {
-      await api.post('/expenses', { ...eForm, property_id: parseInt(eForm.property_id), amount: parseFloat(eForm.amount) });
-      setShowForm(false);
-      setEForm({ property_id: '', category: 'cleaning', description: '', amount: '', payment_method: 'cash', vendor_name: '', expense_date: new Date().toISOString().split('T')[0] });
-      fetchExpenses();
+      const data = { ...eForm, property_id: parseInt(eForm.property_id), amount: parseFloat(eForm.amount) };
+      if (editId) { await api.put(`/expenses/${editId}`, data); } else { await api.post('/expenses', data); }
+      setShowForm(false); setEForm(emptyEForm); setEditId(null); fetchExpenses();
     } catch (err) { console.error(err); }
+  };
+
+  const deleteExpense = async (id) => {
+    if (!window.confirm('Delete this expense?')) return;
+    try { await api.delete(`/expenses/${id}`); fetchExpenses(); } catch (err) { console.error(err); }
   };
 
   if (loading) return <LoadingSpinner />;
@@ -1065,7 +1085,7 @@ const Expenses = () => {
       {showForm && (
         <div className="modal-overlay" onClick={() => setShowForm(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <div className="modal-header"><h2>Add Expense</h2><button className="modal-close" onClick={() => setShowForm(false)}><X size={20}/></button></div>
+            <div className="modal-header"><h2>{editId ? 'Edit Expense' : 'Add Expense'}</h2><button className="modal-close" onClick={() => setShowForm(false)}><X size={20}/></button></div>
             <form onSubmit={handleExpense} className="modal-form">
               <div className="form-row">
                 <div className="form-group"><label>Property *</label><select required value={eForm.property_id} onChange={e => setEForm({...eForm, property_id: e.target.value})}><option value="">Select property</option>{properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
@@ -1080,7 +1100,7 @@ const Expenses = () => {
                 <div className="form-group"><label>Payment Method</label><select value={eForm.payment_method} onChange={e => setEForm({...eForm, payment_method: e.target.value})}><option value="cash">Cash</option><option value="UPI">UPI</option><option value="bank_transfer">Bank Transfer</option><option value="card">Card</option></select></div>
                 <div className="form-group"><label>Vendor</label><input value={eForm.vendor_name} onChange={e => setEForm({...eForm, vendor_name: e.target.value})} placeholder="Vendor name"/></div>
               </div>
-              <div className="form-actions"><button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>Cancel</button><button type="submit" className="btn btn-primary">Add Expense</button></div>
+              <div className="form-actions"><button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>Cancel</button><button type="submit" className="btn btn-primary">{editId ? 'Save Changes' : 'Add Expense'}</button></div>
             </form>
           </div>
         </div>
@@ -1111,8 +1131,10 @@ const Expenses = () => {
               <span className="expense-desc">{expense.description}</span>
               <span className="expense-date">{format(new Date(expense.expense_date), 'MMM dd, yyyy')}</span>
             </div>
-            <div className="expense-amount">
-              -₹{parseFloat(expense.amount).toLocaleString()}
+            <div className="expense-actions">
+              <span className="expense-amount">-₹{parseFloat(expense.amount).toLocaleString()}</span>
+              <button className="btn-icon btn-edit" title="Edit" onClick={() => openEditExp(expense)}><Edit3 size={15}/></button>
+              <button className="btn-icon btn-danger" title="Delete" onClick={() => deleteExpense(expense.id)}><Trash2 size={15}/></button>
             </div>
           </div>
         ))}

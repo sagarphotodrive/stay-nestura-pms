@@ -1554,3 +1554,17 @@ a {
 .day-cell.available-click:hover .empty-cell-plus {
   color: #6366f1; background: rgba(99, 102, 241, 0.15);
 }
+
+/* Edit/Delete action buttons */
+.btn-icon { background: none; border: none; cursor: pointer; padding: 4px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; transition: all 0.15s; }
+.btn-icon.btn-edit { color: var(--info); }
+.btn-icon.btn-edit:hover { background: rgba(59,130,246,0.1); }
+.btn-icon.btn-danger { color: var(--danger); }
+.btn-icon.btn-danger:hover { background: rgba(239,68,68,0.1); }
+
+.expense-actions { display: flex; align-items: center; gap: 8px; }
+.expense-actions .expense-amount { font-weight: 600; color: var(--danger); white-space: nowrap; }
+
+.card-actions { position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; }
+.card-edit-btn { background: rgba(255,255,255,0.9); border: none; cursor: pointer; padding: 5px; border-radius: 6px; display: inline-flex; align-items: center; color: var(--text-secondary); transition: all 0.15s; }
+.card-edit-btn:hover { background: #fff; color: var(--info); box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
