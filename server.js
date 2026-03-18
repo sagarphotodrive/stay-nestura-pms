@@ -1622,24 +1622,18 @@ app.use((req, res) => {
 
 const PORT = process.env.PORT || 5000;
 
-// Connect to MongoDB then start server
-(async () => {
-  try {
-    useMongo = await connectDB();
-    if (useMongo) {
-      console.log('[MongoDB] Using MongoDB for data persistence');
-    } else {
-      console.log('[Fallback] Using in-memory store');
-    }
-  } catch (err) {
-    console.log('[Fallback] MongoDB connection failed, using in-memory store');
-  }
+// Start server IMMEDIATELY (Render needs port open fast), then connect MongoDB in background
+server.listen(PORT, () => {
+  console.log(`Stay Nestura PMS running on port ${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+});
 
-  server.listen(PORT, () => {
-    console.log(`Stay Nestura PMS running on port ${PORT}`);
-    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`Database: ${useMongo ? 'MongoDB' : 'In-Memory'}`);
-  });
-})();
+// Connect MongoDB in background — server uses in-memory until connected
+connectDB().then(connected => {
+  useMongo = connected;
+  console.log(`Database: ${useMongo ? 'MongoDB' : 'In-Memory'}`);
+}).catch(() => {
+  console.log('Database: In-Memory (MongoDB failed)');
+});
 
 module.exports = { app, server, io };
