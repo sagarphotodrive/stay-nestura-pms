@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Building2, Calendar, Users,
   IndianRupee, BarChart3, Settings, Bell, Menu, X,
   Plus, Search, ChevronRight, Home, LogOut,
-  RefreshCw, DollarSign, TrendingUp, UserCheck,
+  RefreshCw, TrendingUp, UserCheck,
   UserX, AlertCircle, CheckCircle, Clock, Link2, Trash2, ExternalLink, Edit3,
   Download, Upload
 } from 'lucide-react';
@@ -209,7 +209,7 @@ const Dashboard = () => {
         <StatCard
           title="Month Revenue"
           value={`₹${(stats?.month?.net_revenue || 0).toLocaleString()}`}
-          icon={DollarSign}
+          icon={IndianRupee}
           color="#3b82f6"
         />
         <StatCard
@@ -299,7 +299,7 @@ const Properties = () => {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
-  const emptyForm = { name: '', property_type: 'Homestay', address: '', city: '', state: 'Maharashtra', pincode: '', total_rooms: 1, max_guests: 2, base_price: '', description: '' };
+  const emptyForm = { name: '', property_type: 'Bungalow - 1 BHK', address: '', city: '', state: 'Maharashtra', pincode: '', total_rooms: 1, max_guests: 2, base_price: '', description: '' };
   const [form, setForm] = useState(emptyForm);
 
   useEffect(() => { fetchProperties(); }, []);
@@ -338,13 +338,13 @@ const Properties = () => {
       </div>
 
       {showForm && (
-        <div className="modal-overlay" onClick={() => setShowForm(false)}>
+        <div className="modal-overlay">
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <div className="modal-header"><h2>{editId ? 'Edit Property' : 'Add New Property'}</h2><button className="modal-close" onClick={() => setShowForm(false)}><X size={20}/></button></div>
             <form onSubmit={handleSubmit} className="modal-form">
               <div className="form-group"><label>Property Name *</label><input required value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="e.g. Sunset Homestay"/></div>
               <div className="form-row">
-                <div className="form-group"><label>Type</label><select value={form.property_type} onChange={e => setForm({...form, property_type: e.target.value})}><option>Homestay</option><option>Room</option><option>Villa</option><option>Apartment</option></select></div>
+                <div className="form-group"><label>Type</label><select value={form.property_type} onChange={e => setForm({...form, property_type: e.target.value})}><option>Bungalow - 1 BHK</option><option>Bungalow - 2 BHK</option><option>Bungalow - 3 BHK</option><option>Bungalow - 4 BHK</option><option>Single Room</option><option>Homestay</option><option>Villa</option><option>Apartment</option></select></div>
                 <div className="form-group"><label>Base Price (per night) *</label><input required type="number" value={form.base_price} onChange={e => setForm({...form, base_price: e.target.value})} placeholder="e.g. 2500"/></div>
               </div>
               <div className="form-group"><label>Address *</label><input required value={form.address} onChange={e => setForm({...form, address: e.target.value})} placeholder="Full address"/></div>
@@ -426,8 +426,8 @@ const MasterCalendar = () => {
         api.get('/properties'),
         api.get('/bookings', {
           params: {
-            start_date: days[0].toISOString().split('T')[0],
-            end_date: days[days.length - 1].toISOString().split('T')[0]
+            start_date: format(days[0], 'yyyy-MM-dd'),
+            end_date: format(days[days.length - 1], 'yyyy-MM-dd')
           }
         }),
         api.get('/ical-links')
@@ -443,10 +443,11 @@ const MasterCalendar = () => {
   };
 
   const getBookingForDate = (propertyId, date) => {
+    const dateStr = format(date, 'yyyy-MM-dd');
     return bookings.find(b =>
       b.property_id === propertyId &&
-      new Date(b.check_in) <= date &&
-      new Date(b.check_out) > date &&
+      b.check_in <= dateStr &&
+      b.check_out > dateStr &&
       b.booking_status !== 'cancelled'
     );
   };
@@ -483,7 +484,7 @@ const MasterCalendar = () => {
           {days.map(day => (
             <div key={day.toISOString()} className={`day-col ${format(day, 'EEE') === 'Sun' ? 'weekend' : ''}`}>
               <span className="day-name">{format(day, 'EEE')}</span>
-              <span className="day-num">{format(day, 'd')}</span>
+              <span className="day-num">{format(day, 'd MMM')}</span>
             </div>
           ))}
         </div>
@@ -543,7 +544,7 @@ const MasterCalendar = () => {
 
       {/* Booking Detail Modal */}
       {selectedBooking && (
-        <div className="modal-overlay" onClick={() => setSelectedBooking(null)}>
+        <div className="modal-overlay">
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Booking Details</h2>
@@ -753,7 +754,7 @@ const Bookings = () => {
       setProperties(pRes.data || []);
     } catch (err) {}
     setEditId(b.id);
-    setBForm({ property_id: String(b.property_id), first_name: b.first_name || '', last_name: b.last_name || '', phone: b.phone || '', email: b.email || '', check_in: b.check_in, check_out: b.check_out, adults: b.adults || 1, children: b.children || 0, nightly_rate: b.nightly_rate || '', channel: b.channel || 'direct', payment_method: b.payment_method || 'UPI', special_requests: b.special_requests || '' });
+    setBForm({ property_id: String(b.property_id), first_name: b.first_name || '', last_name: b.last_name || '', phone: b.phone || '', email: b.email || '', check_in: b.check_in, check_out: b.check_out, adults: b.adults || 1, children: b.children || 0, nightly_rate: b.nightly_rate || '', channel: b.channel || 'direct', payment_method: b.payment_method || 'UPI', special_requests: b.special_requests || '', advance_paid: b.paid_amount || 0 });
     setShowForm(true);
   };
 
@@ -809,7 +810,7 @@ const Bookings = () => {
       </div>
 
       {showForm && (
-        <div className="modal-overlay" onClick={() => setShowForm(false)}>
+        <div className="modal-overlay">
           <div className="modal-content modal-large" onClick={e => e.stopPropagation()}>
             <div className="modal-header"><h2>{editId ? 'Edit Booking' : 'New Booking'}</h2><button className="modal-close" onClick={() => setShowForm(false)}><X size={20}/></button></div>
             <form onSubmit={handleBooking} className="modal-form">
@@ -843,28 +844,20 @@ const Bookings = () => {
               )}
 
               <div className="form-row">
-                <div className="form-group"><label>Nightly Rate (₹) *</label><input required type="number" value={bForm.nightly_rate} onChange={e => setBForm({...bForm, nightly_rate: e.target.value})} placeholder="e.g. 2500"/></div>
+                <div className="form-group"><label>Adults</label><input type="number" min="1" value={bForm.adults} onChange={e => setBForm({...bForm, adults: e.target.value})}/></div>
+                <div className="form-group"><label>Children</label><input type="number" min="0" value={bForm.children} onChange={e => setBForm({...bForm, children: e.target.value})}/></div>
                 <div className="form-group"><label>Channel</label><select value={bForm.channel} onChange={e => setBForm({...bForm, channel: e.target.value})}><option value="direct">Direct</option><option value="airbnb">Airbnb</option><option value="booking.com">Booking.com</option><option value="makemytrip">MakeMyTrip</option><option value="goibibo">Goibibo</option></select></div>
               </div>
 
-              {/* Total & Advance Payment */}
-              {bForm.nightly_rate && bForm.check_in && bForm.check_out && (() => {
-                const nights = Math.max(1, Math.ceil((new Date(bForm.check_out) - new Date(bForm.check_in)) / 86400000));
-                const total = parseFloat(bForm.nightly_rate) * nights;
-                const advance = parseFloat(bForm.advance_paid) || 0;
-                const balance = total - advance;
-                return (
-                  <div className="payment-summary-box">
-                    <div className="payment-row"><span>Total Amount ({nights} night{nights > 1 ? 's' : ''})</span><strong>₹{total.toLocaleString()}</strong></div>
-                    <div className="form-group" style={{ margin: '8px 0' }}><label>Advance Paid (₹)</label><input type="number" min="0" value={bForm.advance_paid} onChange={e => setBForm({...bForm, advance_paid: e.target.value})} placeholder="0"/></div>
-                    <div className="payment-row" style={{ color: balance > 0 ? '#ef4444' : '#10b981' }}><span>Balance Due</span><strong>₹{balance.toLocaleString()}</strong></div>
-                  </div>
-                );
-              })()}
+              <h4 style={{ margin: '12px 0 8px', color: '#94a3b8', fontSize: '14px' }}>Payment Details</h4>
               <div className="form-row">
-                <div className="form-group"><label>Adults</label><input type="number" min="1" value={bForm.adults} onChange={e => setBForm({...bForm, adults: e.target.value})}/></div>
-                <div className="form-group"><label>Children</label><input type="number" min="0" value={bForm.children} onChange={e => setBForm({...bForm, children: e.target.value})}/></div>
-                <div className="form-group"><label>Payment</label><select value={bForm.payment_method} onChange={e => setBForm({...bForm, payment_method: e.target.value})}><option value="UPI">UPI</option><option value="cash">Cash</option><option value="card">Card</option><option value="bank_transfer">Bank Transfer</option></select></div>
+                <div className="form-group"><label>Nightly Rate (₹) *</label><input required type="number" value={bForm.nightly_rate} onChange={e => setBForm({...bForm, nightly_rate: e.target.value})} placeholder="e.g. 2500"/></div>
+                <div className="form-group"><label>Total Amount (₹)</label><input type="text" readOnly value={bForm.nightly_rate && bForm.check_in && bForm.check_out ? `₹${(parseFloat(bForm.nightly_rate) * Math.max(1, Math.ceil((new Date(bForm.check_out) - new Date(bForm.check_in)) / 86400000))).toLocaleString()}` : 'Fill dates & rate'} style={{ background: '#1e293b', color: '#e2e8f0', fontWeight: 600 }}/></div>
+              </div>
+              <div className="form-row">
+                <div className="form-group"><label>Advance Paid (₹)</label><input type="number" min="0" value={bForm.advance_paid} onChange={e => setBForm({...bForm, advance_paid: e.target.value})} placeholder="0"/></div>
+                <div className="form-group"><label>Balance Due (₹)</label><input type="text" readOnly value={bForm.nightly_rate && bForm.check_in && bForm.check_out ? (() => { const t = parseFloat(bForm.nightly_rate) * Math.max(1, Math.ceil((new Date(bForm.check_out) - new Date(bForm.check_in)) / 86400000)); const b = t - (parseFloat(bForm.advance_paid) || 0); return `₹${b.toLocaleString()}`; })() : 'Fill dates & rate'} style={{ background: '#1e293b', fontWeight: 600, color: bForm.nightly_rate && bForm.check_in && bForm.check_out && (parseFloat(bForm.nightly_rate) * Math.max(1, Math.ceil((new Date(bForm.check_out) - new Date(bForm.check_in)) / 86400000)) - (parseFloat(bForm.advance_paid) || 0)) > 0 ? '#ef4444' : '#10b981' }}/></div>
+                <div className="form-group"><label>Payment Method</label><select value={bForm.payment_method} onChange={e => setBForm({...bForm, payment_method: e.target.value})}><option value="UPI">UPI</option><option value="cash">Cash</option><option value="card">Card</option><option value="bank_transfer">Bank Transfer</option></select></div>
               </div>
               <div className="form-group"><label>Special Requests</label><textarea value={bForm.special_requests} onChange={e => setBForm({...bForm, special_requests: e.target.value})} rows="2" placeholder="Any special requests..."/></div>
               <div className="form-actions">
@@ -928,14 +921,19 @@ const Bookings = () => {
                 <button className="btn btn-sm btn-success" onClick={() => recordPayment(booking)}><IndianRupee size={14} /> Record Payment</button>
               )}
               {booking.booking_status === 'confirmed' && (
-                <button className="btn btn-sm" onClick={() => updateStatus(booking.id, 'checked-in')}>
-                  Check In
-                </button>
+                <button className="btn btn-sm" onClick={() => updateStatus(booking.id, 'checked-in')}>Check In</button>
               )}
               {booking.booking_status === 'checked-in' && (
-                <button className="btn btn-sm" onClick={() => updateStatus(booking.id, 'checked-out')}>
-                  Check Out
-                </button>
+                <>
+                  <button className="btn btn-sm" onClick={() => updateStatus(booking.id, 'checked-out')}>Check Out</button>
+                  <button className="btn btn-sm btn-secondary" onClick={() => { if(window.confirm('Revert to Confirmed?')) updateStatus(booking.id, 'confirmed'); }}>Undo Check In</button>
+                </>
+              )}
+              {booking.booking_status === 'checked-out' && (
+                <button className="btn btn-sm btn-secondary" onClick={() => { if(window.confirm('Revert to Checked In?')) updateStatus(booking.id, 'checked-in'); }}>Undo Check Out</button>
+              )}
+              {booking.booking_status === 'cancelled' && (
+                <button className="btn btn-sm btn-success" onClick={() => { if(window.confirm('Rebook this booking?')) updateStatus(booking.id, 'confirmed'); }}>Rebook</button>
               )}
               {booking.booking_status !== 'cancelled' && (
                 <button className="btn btn-sm btn-danger" onClick={() => { if(window.confirm('Cancel this booking?')) updateStatus(booking.id, 'cancelled'); }}>Cancel</button>
@@ -992,7 +990,7 @@ const Guests = () => {
       </div>
 
       {showForm && (
-        <div className="modal-overlay" onClick={() => setShowForm(false)}>
+        <div className="modal-overlay">
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <div className="modal-header"><h2>{editId ? 'Edit Guest' : 'Add Guest'}</h2><button className="modal-close" onClick={() => setShowForm(false)}><X size={20}/></button></div>
             <form onSubmit={handleGuest} className="modal-form">
@@ -1129,12 +1127,12 @@ const Expenses = () => {
       </div>
 
       {showForm && (
-        <div className="modal-overlay" onClick={() => setShowForm(false)}>
+        <div className="modal-overlay">
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <div className="modal-header"><h2>{editId ? 'Edit Expense' : 'Add Expense'}</h2><button className="modal-close" onClick={() => setShowForm(false)}><X size={20}/></button></div>
             <form onSubmit={handleExpense} className="modal-form">
               <div className="form-row">
-                <div className="form-group"><label>Property *</label><select required value={eForm.property_id} onChange={e => setEForm({...eForm, property_id: e.target.value})}><option value="">Select property</option>{properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+                <div className="form-group"><label>Property *</label><select required value={eForm.property_id} onChange={e => setEForm({...eForm, property_id: e.target.value})}><option value="">Select property</option><option value="0">Common - Stay Nestura (All Properties)</option>{properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
                 <div className="form-group"><label>Category *</label><select value={eForm.category} onChange={e => setEForm({...eForm, category: e.target.value})}><option value="cleaning">Cleaning</option><option value="electricity">Electricity</option><option value="water">Water</option><option value="laundry">Laundry</option><option value="maintenance">Maintenance</option><option value="internet">Internet</option><option value="supplies">Supplies</option><option value="groceries">Groceries</option><option value="staff_salary">Staff Salary</option><option value="travel">Travel</option><option value="marketing">Marketing</option><option value="other">Other</option></select></div>
               </div>
               <div className="form-group"><label>Description *</label><input required value={eForm.description} onChange={e => setEForm({...eForm, description: e.target.value})} placeholder="What is this expense for?"/></div>
@@ -1175,6 +1173,7 @@ const Expenses = () => {
             <div className="expense-info">
               <span className="expense-category">{expense.category}</span>
               <span className="expense-desc">{expense.description}</span>
+              <span className="expense-property" style={{fontSize:'12px',color:'#94a3b8'}}>{expense.property_id === 0 ? 'Common - Stay Nestura' : expense.property_name || ''}</span>
               <span className="expense-date">{format(new Date(expense.expense_date), 'MMM dd, yyyy')}</span>
             </div>
             <div className="expense-actions">
@@ -1209,28 +1208,24 @@ const Reports = () => {
 
   const fetchAllReports = async () => {
     setLoading(true);
-    try {
-      const [pnlRes, revRes, guestRes, payRes, adrRes, expRes, occRes] = await Promise.all([
-        api.get('/reports/profit-loss', { params: { year, month } }),
-        api.get('/reports/revenue'),
-        api.get('/reports/guest-analytics'),
-        api.get('/reports/payment-summary'),
-        api.get('/reports/adr'),
-        api.get('/expenses/summary'),
-        api.get('/bookings/stats/overview')
-      ]);
-      setReport(pnlRes.data);
-      setRevenue(revRes.data);
-      setGuestAnalytics(guestRes.data);
-      setPaymentSummary(payRes.data);
-      setAdrData(adrRes.data);
-      setExpSummary(expRes.data);
-      setOccupancy(occRes.data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+    const results = await Promise.allSettled([
+      api.get('/reports/profit-loss', { params: { year, month } }),
+      api.get('/reports/revenue'),
+      api.get('/reports/guest-analytics'),
+      api.get('/reports/payment-summary'),
+      api.get('/reports/adr'),
+      api.get('/expenses/summary'),
+      api.get('/bookings/stats/overview')
+    ]);
+    const val = (i) => results[i].status === 'fulfilled' ? results[i].value.data : null;
+    if (val(0)) setReport(val(0));
+    if (val(1)) setRevenue(val(1));
+    if (val(2)) setGuestAnalytics(val(2));
+    if (val(3)) setPaymentSummary(val(3));
+    if (val(4)) setAdrData(val(4));
+    if (val(5)) setExpSummary(val(5));
+    if (val(6)) setOccupancy(val(6));
+    setLoading(false);
   };
 
   if (loading) return <LoadingSpinner />;
@@ -1381,7 +1376,7 @@ const Reports = () => {
           <div className="stats-grid">
             <StatCard title="Total Bookings" value={occupancy.summary?.total_bookings || 0} icon={UserCheck} color="#10b981" />
             <StatCard title="Unique Guests" value={occupancy.summary?.unique_guests || 0} icon={Users} color="#6366f1" />
-            <StatCard title="Gross Revenue" value={`₹${(occupancy.summary?.total_gross || 0).toLocaleString()}`} icon={DollarSign} color="#3b82f6" />
+            <StatCard title="Gross Revenue" value={`₹${(occupancy.summary?.total_gross || 0).toLocaleString()}`} icon={IndianRupee} color="#3b82f6" />
             <StatCard title="Net Revenue" value={`₹${(occupancy.summary?.total_net || 0).toLocaleString()}`} icon={TrendingUp} color="#10b981" />
           </div>
           <div className="card" style={{ marginTop: '16px' }}>
@@ -1471,7 +1466,7 @@ const Reports = () => {
             <StatCard title="Repeat Rate" value={`${guestAnalytics.repeat_rate}%`} icon={TrendingUp} color="#3b82f6" />
           </div>
           <div className="stats-grid" style={{ marginTop: '16px' }}>
-            <StatCard title="Avg Lifetime Value" value={`₹${guestAnalytics.avg_lifetime_value.toLocaleString()}`} icon={DollarSign} color="#8b5cf6" />
+            <StatCard title="Avg Lifetime Value" value={`₹${guestAnalytics.avg_lifetime_value.toLocaleString()}`} icon={IndianRupee} color="#8b5cf6" />
           </div>
           <div className="card" style={{ marginTop: '16px' }}>
             <div className="card-header"><h3>Top Guests by Lifetime Value</h3></div>
@@ -1500,13 +1495,13 @@ const Reports = () => {
         <div className="report-sections">
           <div className="stats-grid">
             <StatCard title="Paid Bookings" value={paymentSummary.paid.count} icon={CheckCircle} color="#10b981" />
-            <StatCard title="Paid Amount" value={`₹${paymentSummary.paid.total.toLocaleString()}`} icon={DollarSign} color="#10b981" />
+            <StatCard title="Paid Amount" value={`₹${paymentSummary.paid.total.toLocaleString()}`} icon={IndianRupee} color="#10b981" />
             <StatCard title="Pending Bookings" value={paymentSummary.pending.count} icon={Clock} color="#f59e0b" />
             <StatCard title="Pending Amount" value={`₹${paymentSummary.pending.total.toLocaleString()}`} icon={AlertCircle} color="#ef4444" />
           </div>
           <div className="stats-grid" style={{ marginTop: '16px' }}>
             <StatCard title="Partial Payments" value={paymentSummary.partial.count} icon={Clock} color="#8b5cf6" />
-            <StatCard title="Collected (Partial)" value={`₹${paymentSummary.partial.collected.toLocaleString()}`} icon={DollarSign} color="#6366f1" />
+            <StatCard title="Collected (Partial)" value={`₹${paymentSummary.partial.collected.toLocaleString()}`} icon={IndianRupee} color="#6366f1" />
             <StatCard title="Remaining (Partial)" value={`₹${paymentSummary.partial.remaining.toLocaleString()}`} icon={AlertCircle} color="#ef4444" />
           </div>
           <div className="card" style={{ marginTop: '16px' }}>

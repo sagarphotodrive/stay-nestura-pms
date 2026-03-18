@@ -1461,7 +1461,7 @@ a {
 .availability-indicator.conflict { background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); }
 
 /* Modal large variant */
-.modal-large { max-width: 700px; }
+.modal-large { max-width: 700px; max-height: 95vh; }
 
 /* iCal Links Section */
 .ical-section {
@@ -1566,9 +1566,9 @@ a {
 .expense-actions { display: flex; align-items: center; gap: 8px; }
 .expense-actions .expense-amount { font-weight: 600; color: var(--danger); white-space: nowrap; }
 
-.card-actions { position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; }
-.card-edit-btn { background: rgba(255,255,255,0.9); border: none; cursor: pointer; padding: 5px; border-radius: 6px; display: inline-flex; align-items: center; color: var(--text-secondary); transition: all 0.15s; }
-.card-edit-btn:hover { background: #fff; color: var(--info); box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+.card-actions { position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; z-index: 10; }
+.card-edit-btn { background: rgba(255,255,255,0.85); border: none; cursor: pointer; padding: 6px; border-radius: 6px; display: inline-flex; align-items: center; color: #374151; transition: all 0.15s; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+.card-edit-btn:hover { background: #fff; color: var(--info); box-shadow: 0 2px 6px rgba(0,0,0,0.2); }
 
 /* Payment summary box in booking form */
 .payment-summary-box { background: #f0f4ff; border: 1px solid #c7d2fe; border-radius: 8px; padding: 12px 16px; margin: 8px 0 12px; }

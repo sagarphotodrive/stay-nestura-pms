@@ -293,6 +293,11 @@ app.put('/api/guests/:id', (req, res) => {
   Object.assign(g, req.body, { updated_at: new Date().toISOString() });
   res.json(g);
 });
+app.delete('/api/guests/:id', (req, res) => {
+  const idx = store.guests.findIndex(g => g.id == req.params.id);
+  if (idx >= 0) store.guests.splice(idx, 1);
+  res.json({ message: 'Deleted' });
+});
 
 // --- EXPENSES ---
 app.get('/api/expenses/summary', (req, res) => {
@@ -313,7 +318,7 @@ app.get('/api/expenses', (req, res) => {
   let exps = [...store.expenses];
   if (req.query.property_id) exps = exps.filter(e => e.property_id == req.query.property_id);
   if (req.query.category) exps = exps.filter(e => e.category === req.query.category);
-  const enriched = exps.map(e => ({ ...e, property_name: (store.properties.find(p => p.id === e.property_id) || {}).name }));
+  const enriched = exps.map(e => ({ ...e, property_name: e.property_id === 0 ? 'Common - Stay Nestura' : (store.properties.find(p => p.id === e.property_id) || {}).name }));
   const page = parseInt(req.query.page) || 1; const limit = parseInt(req.query.limit) || 50;
   res.json({ expenses: enriched.slice((page-1)*limit, page*limit), total: enriched.length, page, pages: Math.ceil(enriched.length/limit) });
 });
@@ -356,11 +361,16 @@ app.get('/api/reports/profit-loss', (req, res) => {
   const endDate = new Date(year, month, 0).toISOString().split('T')[0];
   const daysInMonth = new Date(year, month, 0).getDate();
   const bks = store.bookings.filter(b => b.booking_status !== 'cancelled');
-  const properties = store.properties.filter(p => p.is_active).map(p => {
+  const monthExps = store.expenses.filter(e => e.expense_date >= startDate && e.expense_date <= endDate);
+  const commonExps = monthExps.filter(e => e.property_id === 0).reduce((s,e) => s+e.amount, 0);
+  const activeProps = store.properties.filter(p => p.is_active);
+  const commonPerProp = activeProps.length ? Math.round(commonExps / activeProps.length) : 0;
+  const properties = activeProps.map(p => {
     const pb = bks.filter(b => b.property_id === p.id);
     const gross = pb.reduce((s,b) => s+b.gross_amount, 0);
     const comm = pb.reduce((s,b) => s+b.commission_amount, 0);
-    const exps = store.expenses.filter(e => e.property_id === p.id).reduce((s,e) => s+e.amount, 0);
+    const propExps = monthExps.filter(e => e.property_id === p.id).reduce((s,e) => s+e.amount, 0);
+    const exps = propExps + commonPerProp;
     return { property_id: p.id, property_name: p.name, occupancy_percent: Math.round(pb.length / Math.max(1, p.total_rooms * daysInMonth) * 100), nights_sold: pb.length, gross_revenue: gross, commission: comm, expenses: exps, net_profit: gross - comm - exps };
   });
   const totals = { total_gross: properties.reduce((s,p) => s+p.gross_revenue, 0), total_commission: properties.reduce((s,p) => s+p.commission, 0), total_expenses: properties.reduce((s,p) => s+p.expenses, 0), total_net: properties.reduce((s,p) => s+p.net_profit, 0), total_occupancy: properties.length ? Math.round(properties.reduce((s,p) => s+p.occupancy_percent, 0)/properties.length) : 0 };
@@ -884,7 +894,7 @@ app.get('/', (req, res) => {
     <div class="stats-grid" id="statsGrid">
       <div class="stat-card">
         <div class="stat-card-top">
-          <div class="stat-icon" style="background:linear-gradient(135deg,var(--accent),var(--purple))">SN</div>
+          <div class="stat-icon" style="background:linear-gradient(135deg,var(--accent),var(--purple));font-size:10px;font-weight:600;text-align:center;line-height:1.2">Properties</div>
           <span class="stat-badge up" id="propBadge">Loading</span>
         </div>
         <div class="stat-value" id="propCount">--</div>
@@ -892,7 +902,7 @@ app.get('/', (req, res) => {
       </div>
       <div class="stat-card">
         <div class="stat-card-top">
-          <div class="stat-icon" style="background:linear-gradient(135deg,var(--pink),var(--orange))">BK</div>
+          <div class="stat-icon" style="background:linear-gradient(135deg,var(--pink),var(--orange));font-size:10px;font-weight:600;text-align:center;line-height:1.2">Bookings</div>
           <span class="stat-badge up" id="bookBadge">Loading</span>
         </div>
         <div class="stat-value" id="bookCount">--</div>
@@ -900,7 +910,7 @@ app.get('/', (req, res) => {
       </div>
       <div class="stat-card">
         <div class="stat-card-top">
-          <div class="stat-icon" style="background:linear-gradient(135deg,var(--green),var(--cyan))">GS</div>
+          <div class="stat-icon" style="background:linear-gradient(135deg,var(--green),var(--cyan));font-size:10px;font-weight:600;text-align:center;line-height:1.2">Guests</div>
           <span class="stat-badge up" id="guestBadge">Loading</span>
         </div>
         <div class="stat-value" id="guestCount">--</div>
@@ -908,7 +918,7 @@ app.get('/', (req, res) => {
       </div>
       <div class="stat-card">
         <div class="stat-card-top">
-          <div class="stat-icon" style="background:linear-gradient(135deg,var(--cyan),var(--blue))">CH</div>
+          <div class="stat-icon" style="background:linear-gradient(135deg,var(--cyan),var(--blue));font-size:10px;font-weight:600;text-align:center;line-height:1.2">Channels</div>
           <span class="stat-badge up">Active</span>
         </div>
         <div class="stat-value" id="channelCount">--</div>
