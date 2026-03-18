@@ -1353,21 +1353,29 @@ const Reports = () => {
   const [loading, setLoading] = useState(true);
   const [year, setYear] = useState(new Date().getFullYear());
   const [month, setMonth] = useState(new Date().getMonth() + 1);
+  const [propertyId, setPropertyId] = useState('');
+  const [properties, setProperties] = useState([]);
+
+  useEffect(() => {
+    api.get('/properties').then(res => setProperties(res.data || [])).catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetchAllReports();
-  }, [year, month]);
+  }, [year, month, propertyId]);
 
   const fetchAllReports = async () => {
     setLoading(true);
+    const params = { year, month };
+    if (propertyId) params.property_id = propertyId;
     const results = await Promise.allSettled([
-      api.get('/reports/profit-loss', { params: { year, month } }),
-      api.get('/reports/revenue'),
-      api.get('/reports/guest-analytics'),
-      api.get('/reports/payment-summary'),
-      api.get('/reports/adr'),
-      api.get('/expenses/summary'),
-      api.get('/bookings/stats/overview')
+      api.get('/reports/profit-loss', { params }),
+      api.get('/reports/revenue', { params }),
+      api.get('/reports/guest-analytics', { params }),
+      api.get('/reports/payment-summary', { params }),
+      api.get('/reports/adr', { params }),
+      api.get('/expenses/summary', { params }),
+      api.get('/bookings/stats/overview', { params })
     ]);
     const val = (i) => results[i].status === 'fulfilled' ? results[i].value.data : null;
     if (val(0)) setReport(val(0));
@@ -1400,6 +1408,12 @@ const Reports = () => {
       <div className="page-header">
         <h1>Reports & Analytics</h1>
         <div className="report-filters">
+          <select value={propertyId} onChange={(e) => setPropertyId(e.target.value)}>
+            <option value="">All Properties</option>
+            {properties.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
           <select value={month} onChange={(e) => setMonth(parseInt(e.target.value))}>
             {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
               <option key={m} value={m}>{format(new Date(2024, m - 1), 'MMMM')}</option>

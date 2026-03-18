@@ -199,15 +199,24 @@ app.get('/api/bookings/today', async (req, res) => {
 });
 app.get('/api/bookings/stats/overview', async (req, res) => {
   try {
-    let bks, allBks, props;
+    const year = parseInt(req.query.year) || new Date().getFullYear();
+    const month = parseInt(req.query.month) || new Date().getMonth() + 1;
+    const propFilter = req.query.property_id ? parseInt(req.query.property_id) : null;
+    const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
+    const endDate = new Date(year, month, 0).toISOString().split('T')[0];
+    const daysInMonth = new Date(year, month, 0).getDate();
+    let allBks, allProps;
     if (useMongo) {
-      [allBks, props] = await Promise.all([Booking.find().lean(), Property.find({ is_active: true }).lean()]);
-      bks = allBks.filter(b => b.booking_status !== 'cancelled');
+      [allBks, allProps] = await Promise.all([Booking.find().lean(), Property.find({ is_active: true }).lean()]);
     } else {
-      allBks = store.bookings; bks = allBks.filter(b => b.booking_status !== 'cancelled');
-      props = store.properties.filter(p => p.is_active);
+      allBks = store.bookings;
+      allProps = store.properties.filter(p => p.is_active);
     }
-    res.json({ summary: { total_bookings: bks.length, cancelled_bookings: allBks.filter(b => b.booking_status === 'cancelled').length, total_gross: bks.reduce((s,b) => s+b.gross_amount, 0), total_commission: bks.reduce((s,b) => s+b.commission_amount, 0), total_net: bks.reduce((s,b) => s+b.net_amount, 0), confirmed_bookings: bks.length, unique_guests: new Set(bks.map(b => b.guest_id)).size }, occupancy: props.map(p => ({ property_id: p.id, property_name: p.name, total_nights_booked: bks.filter(b => b.property_id === p.id).length, total_nights_available: p.total_rooms * 30, occupancy_percent: Math.round(bks.filter(b => b.property_id === p.id).length / (p.total_rooms * 30) * 100) })) });
+    let bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.check_in >= startDate && b.check_in <= endDate);
+    let cancelledBks = allBks.filter(b => b.booking_status === 'cancelled' && b.check_in >= startDate && b.check_in <= endDate);
+    if (propFilter) { bks = bks.filter(b => b.property_id === propFilter); cancelledBks = cancelledBks.filter(b => b.property_id === propFilter); }
+    const props = propFilter ? allProps.filter(p => p.id === propFilter) : allProps;
+    res.json({ summary: { total_bookings: bks.length, cancelled_bookings: cancelledBks.length, total_gross: bks.reduce((s,b) => s+b.gross_amount, 0), total_commission: bks.reduce((s,b) => s+b.commission_amount, 0), total_net: bks.reduce((s,b) => s+b.net_amount, 0), confirmed_bookings: bks.length, unique_guests: new Set(bks.map(b => b.guest_id)).size }, occupancy: props.map(p => ({ property_id: p.id, property_name: p.name, total_nights_booked: bks.filter(b => b.property_id === p.id).length, total_nights_available: p.total_rooms * daysInMonth, occupancy_percent: Math.round(bks.filter(b => b.property_id === p.id).length / Math.max(1, p.total_rooms * daysInMonth) * 100) })) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 app.get('/api/bookings/:id', async (req, res) => {
@@ -471,7 +480,14 @@ app.delete('/api/guests/:id', async (req, res) => {
 // --- EXPENSES ---
 app.get('/api/expenses/summary', async (req, res) => {
   try {
-    const exps = useMongo ? await Expense.find().lean() : store.expenses;
+    const year = parseInt(req.query.year) || new Date().getFullYear();
+    const month = parseInt(req.query.month) || new Date().getMonth() + 1;
+    const propFilter = req.query.property_id ? parseInt(req.query.property_id) : null;
+    const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
+    const endDate = new Date(year, month, 0).toISOString().split('T')[0];
+    const allExps = useMongo ? await Expense.find().lean() : store.expenses;
+    let exps = allExps.filter(e => e.expense_date >= startDate && e.expense_date <= endDate);
+    if (propFilter) exps = exps.filter(e => e.property_id === propFilter || e.property_id === 0);
     const props = useMongo ? await Property.find().lean() : store.properties;
     const byCategory = {}; const byProperty = {};
     exps.forEach(e => {
@@ -574,17 +590,21 @@ app.get('/api/reports/profit-loss', async (req, res) => {
   try {
     const year = parseInt(req.query.year) || new Date().getFullYear();
     const month = parseInt(req.query.month) || new Date().getMonth() + 1;
+    const propFilter = req.query.property_id ? parseInt(req.query.property_id) : null;
     const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
     const endDate = new Date(year, month, 0).toISOString().split('T')[0];
     const daysInMonth = new Date(year, month, 0).getDate();
     const allBks = useMongo ? await Booking.find().lean() : store.bookings;
-    const bks = allBks.filter(b => b.booking_status !== 'cancelled');
+    let bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.check_in >= startDate && b.check_in <= endDate);
+    if (propFilter) bks = bks.filter(b => b.property_id === propFilter);
     const allExps = useMongo ? await Expense.find().lean() : store.expenses;
-    const monthExps = allExps.filter(e => e.expense_date >= startDate && e.expense_date <= endDate);
+    let monthExps = allExps.filter(e => e.expense_date >= startDate && e.expense_date <= endDate);
+    if (propFilter) monthExps = monthExps.filter(e => e.property_id === propFilter || e.property_id === 0);
     const commonExps = monthExps.filter(e => e.property_id === 0).reduce((s,e) => s+e.amount, 0);
     const activeProps = useMongo ? await Property.find({ is_active: true }).lean() : store.properties.filter(p => p.is_active);
-    const commonPerProp = activeProps.length ? Math.round(commonExps / activeProps.length) : 0;
-    const properties = activeProps.map(p => {
+    const filteredProps = propFilter ? activeProps.filter(p => p.id === propFilter) : activeProps;
+    const commonPerProp = filteredProps.length ? Math.round(commonExps / filteredProps.length) : 0;
+    const properties = filteredProps.map(p => {
       const pb = bks.filter(b => b.property_id === p.id);
       const gross = pb.reduce((s,b) => s+b.gross_amount, 0);
       const comm = pb.reduce((s,b) => s+b.commission_amount, 0);
@@ -613,8 +633,14 @@ app.post('/api/reports/daily-brief/send', (req, res) => {
 });
 app.get('/api/reports/revenue', async (req, res) => {
   try {
+    const year = parseInt(req.query.year) || new Date().getFullYear();
+    const month = parseInt(req.query.month) || new Date().getMonth() + 1;
+    const propFilter = req.query.property_id ? parseInt(req.query.property_id) : null;
+    const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
+    const endDate = new Date(year, month, 0).toISOString().split('T')[0];
     const allBks = useMongo ? await Booking.find().lean() : store.bookings;
-    const bks = allBks.filter(b => b.booking_status !== 'cancelled');
+    let bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.check_in >= startDate && b.check_in <= endDate);
+    if (propFilter) bks = bks.filter(b => b.property_id === propFilter);
     const props = useMongo ? await Property.find().lean() : store.properties;
     const byChannel = {}; bks.forEach(b => { if (!byChannel[b.channel]) byChannel[b.channel] = { channel: b.channel, bookings: 0, gross: 0, commission: 0, net: 0 }; byChannel[b.channel].bookings++; byChannel[b.channel].gross += b.gross_amount; byChannel[b.channel].commission += b.commission_amount; byChannel[b.channel].net += b.net_amount; });
     const byMonth = {}; bks.forEach(b => { const m = b.check_in.substring(0,7); if (!byMonth[m]) byMonth[m] = { month: m, bookings: 0, gross: 0, net: 0 }; byMonth[m].bookings++; byMonth[m].gross += b.gross_amount; byMonth[m].net += b.net_amount; });
@@ -626,7 +652,17 @@ app.get('/api/reports/revenue', async (req, res) => {
 // --- REPORT EXTRAS ---
 app.get('/api/reports/guest-analytics', async (req, res) => {
   try {
-    const gs = useMongo ? await Guest.find().lean() : store.guests;
+    const year = parseInt(req.query.year) || new Date().getFullYear();
+    const month = parseInt(req.query.month) || new Date().getMonth() + 1;
+    const propFilter = req.query.property_id ? parseInt(req.query.property_id) : null;
+    const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
+    const endDate = new Date(year, month, 0).toISOString().split('T')[0];
+    const allBks = useMongo ? await Booking.find().lean() : store.bookings;
+    let monthBks = allBks.filter(b => b.booking_status !== 'cancelled' && b.check_in >= startDate && b.check_in <= endDate);
+    if (propFilter) monthBks = monthBks.filter(b => b.property_id === propFilter);
+    const monthGuestIds = new Set(monthBks.map(b => b.guest_id));
+    const allGs = useMongo ? await Guest.find().lean() : store.guests;
+    const gs = allGs.filter(g => monthGuestIds.has(g.id));
     const newGuests = gs.filter(g => (g.total_stays||0) <= 1);
     const repeatGuests = gs.filter(g => (g.total_stays||0) > 1);
     const topGuests = [...gs].sort((a,b) => (b.lifetime_value||0) - (a.lifetime_value||0)).slice(0, 10).map(g => ({ id: g.id, name: `${g.first_name} ${g.last_name}`, phone: g.phone, total_stays: g.total_stays, lifetime_value: g.lifetime_value }));
@@ -635,8 +671,14 @@ app.get('/api/reports/guest-analytics', async (req, res) => {
 });
 app.get('/api/reports/payment-summary', async (req, res) => {
   try {
+    const year = parseInt(req.query.year) || new Date().getFullYear();
+    const month = parseInt(req.query.month) || new Date().getMonth() + 1;
+    const propFilter = req.query.property_id ? parseInt(req.query.property_id) : null;
+    const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
+    const endDate = new Date(year, month, 0).toISOString().split('T')[0];
     const allBks = useMongo ? await Booking.find().lean() : store.bookings;
-    const bks = allBks.filter(b => b.booking_status !== 'cancelled');
+    let bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.check_in >= startDate && b.check_in <= endDate);
+    if (propFilter) bks = bks.filter(b => b.property_id === propFilter);
     const paid = bks.filter(b => b.payment_status === 'paid');
     const pending = bks.filter(b => b.payment_status === 'pending');
     const partial = bks.filter(b => b.payment_status === 'partial');
@@ -651,10 +693,17 @@ app.get('/api/reports/payment-summary', async (req, res) => {
 });
 app.get('/api/reports/adr', async (req, res) => {
   try {
+    const year = parseInt(req.query.year) || new Date().getFullYear();
+    const month = parseInt(req.query.month) || new Date().getMonth() + 1;
+    const propFilter = req.query.property_id ? parseInt(req.query.property_id) : null;
+    const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
+    const endDate = new Date(year, month, 0).toISOString().split('T')[0];
     const allBks = useMongo ? await Booking.find().lean() : store.bookings;
-    const bks = allBks.filter(b => b.booking_status !== 'cancelled');
+    let bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.check_in >= startDate && b.check_in <= endDate);
+    if (propFilter) bks = bks.filter(b => b.property_id === propFilter);
     const activeProps = useMongo ? await Property.find({ is_active: true }).lean() : store.properties.filter(p => p.is_active);
-    const props = activeProps.map(p => {
+    const filteredProps = propFilter ? activeProps.filter(p => p.id === propFilter) : activeProps;
+    const props = filteredProps.map(p => {
       const pb = bks.filter(b => b.property_id === p.id);
       const totalRevenue = pb.reduce((s,b) => s + b.net_amount, 0);
       const totalNights = pb.reduce((s,b) => s + Math.max(1, Math.ceil((new Date(b.check_out) - new Date(b.check_in)) / 86400000)), 0);
