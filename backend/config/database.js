@@ -4,7 +4,7 @@
 const { v4: uuidv4 } = require('uuid') || { v4: () => 'id-' + Math.random().toString(36).substr(2, 9) };
 
 // Simple ID generator
-let idCounter = 100;
+let idCounter = 324;
 const nextId = () => ++idCounter;
 
 // ============ IN-MEMORY DATA STORES ============
@@ -18,9 +18,18 @@ const store = {
     { id: 5, name: 'Single Room Twin Sharing by Stay Nestura', property_type: 'Single Room', address: 'MG Road', city: 'Solapur', state: 'Maharashtra', pincode: '413001', total_rooms: 1, max_guests: 2, base_price: 800, description: 'Stay Nestura single room with twin sharing, budget-friendly with basic amenities', amenities: ['WiFi', 'Fan'], images: [], latitude: 17.6599, longitude: 75.9064, google_maps_link: '', is_active: true, created_at: '2024-03-01T00:00:00Z', updated_at: '2024-03-01T00:00:00Z' },
     { id: 6, name: 'Deluxe Room by Stay Nestura', property_type: 'Single Room', address: 'FC Road', city: 'Solapur', state: 'Maharashtra', pincode: '413001', total_rooms: 1, max_guests: 2, base_price: 1100, description: 'Stay Nestura deluxe room with AC, TV, mini fridge and extra comfort', amenities: ['WiFi', 'AC', 'TV', 'Mini Fridge'], images: [], latitude: 17.6599, longitude: 75.9064, google_maps_link: '', is_active: true, created_at: '2024-03-05T00:00:00Z', updated_at: '2024-03-05T00:00:00Z' },
   ],
-  guests: [],
-  bookings: [],
-  expenses: [],
+  guests: [
+    { id: 201, first_name: 'Amar', last_name: 'Dhole', email: '', phone: '1234567890', id_proof_type: null, id_proof_number: null, id_proof_encrypted: null, address: '', date_of_birth: null, nationality: 'Indian', total_stays: 1, total_spent: 3750, lifetime_value: 3750, preferences: '', notes: '', created_at: '2026-03-17T19:15:48.317Z', updated_at: '2026-03-17T19:15:48.317Z' },
+  ],
+  bookings: [
+    { id: 202, property_id: 3, guest_id: 201, channel: 'direct', check_in: '2026-03-24', check_out: '2026-03-25', adults: 4, children: 0, infants: 0, nightly_rate: 3750, subtotal: 3750, cleaning_fee: 0, service_fee: 0, taxes: 0, gross_amount: 3750, commission_percent: 0, commission_amount: 0, net_amount: 3750, currency: 'INR', payment_status: 'partial', payment_method: 'UPI', paid_amount: 1500, pending_amount: 2250, booking_status: 'confirmed', guest_message: '', special_requests: '', check_in_time: '2:00 PM', check_out_time: '11:00 AM', actual_check_in: null, actual_check_out: null, confirmed_at: '2026-03-17T19:15:48.317Z', cancelled_at: null, created_at: '2026-03-17T19:15:48.317Z', updated_at: '2026-03-17T19:18:02.316Z' },
+  ],
+  expenses: [
+    { id: 203, property_id: 0, category: 'staff_salary', description: 'Shaheen Salary', amount: 14000, payment_method: 'cash', vendor_name: '', expense_date: '2026-03-05', is_recurring: false, created_at: '2026-03-17T19:22:20.355Z', created_by: 'demo-001' },
+    { id: 204, property_id: 0, category: 'staff_salary', description: 'Shaheen yearly Bonus', amount: 10000, payment_method: 'cash', vendor_name: '', expense_date: '2026-03-05', is_recurring: false, created_at: '2026-03-17T19:22:46.875Z', created_by: 'demo-001' },
+    { id: 205, property_id: 0, category: 'cleaning', description: 'Shaheen Cleaning for Shivneri and Torna', amount: 1750, payment_method: 'cash', vendor_name: '', expense_date: '2026-03-05', is_recurring: false, created_at: '2026-03-17T19:23:41.634Z', created_by: 'demo-001' },
+    { id: 206, property_id: 0, category: 'staff_salary', description: 'Jyotiba Advance Salary', amount: 20000, payment_method: 'cash', vendor_name: '', expense_date: '2026-03-05', is_recurring: false, created_at: '2026-03-17T19:32:37.852Z', created_by: 'demo-001' },
+  ],
 
   channel_accounts: [
     { id: 1, channel_name: 'airbnb', account_id: '', api_key_encrypted: null, api_secret_encrypted: null, webhook_secret: null, is_active: true, commission_percent: 3, sync_enabled: true, last_sync: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() },

@@ -1287,6 +1287,56 @@ app.post('/api/data/import', (req, res) => {
   }
 });
 
+// --- CSV EXPORT ---
+function toCsv(data, fields) {
+  const header = fields.join(',');
+  const rows = data.map(item => fields.map(f => {
+    let val = item[f] === null || item[f] === undefined ? '' : String(item[f]);
+    if (val.includes(',') || val.includes('"') || val.includes('\n')) val = '"' + val.replace(/"/g, '""') + '"';
+    return val;
+  }).join(','));
+  return header + '\n' + rows.join('\n');
+}
+app.get('/api/data/export/csv/:type', (req, res) => {
+  const type = req.params.type;
+  let csv = '';
+  if (type === 'properties') {
+    csv = toCsv(store.properties, ['id','name','property_type','address','city','state','pincode','total_rooms','max_guests','base_price','description','is_active']);
+  } else if (type === 'guests') {
+    csv = toCsv(store.guests, ['id','first_name','last_name','email','phone','address','nationality','id_proof_type','id_proof_number','total_stays','total_spent','lifetime_value','created_at']);
+  } else if (type === 'bookings') {
+    const enriched = store.bookings.map(b => { const p = store.properties.find(pr => pr.id === b.property_id) || {}; const g = store.guests.find(gs => gs.id === b.guest_id) || {}; return { ...b, property_name: p.name, guest_name: `${g.first_name||''} ${g.last_name||''}`.trim() }; });
+    csv = toCsv(enriched, ['id','property_name','guest_name','channel','check_in','check_out','adults','children','nightly_rate','gross_amount','paid_amount','pending_amount','payment_status','payment_method','booking_status','created_at']);
+  } else if (type === 'expenses') {
+    const enriched = store.expenses.map(e => ({ ...e, property_name: e.property_id === 0 ? 'Common - Stay Nestura' : (store.properties.find(p => p.id === e.property_id) || {}).name || '' }));
+    csv = toCsv(enriched, ['id','property_name','category','description','amount','payment_method','vendor_name','expense_date','created_at']);
+  } else {
+    return res.status(400).json({ error: 'Invalid type. Use: properties, guests, bookings, expenses' });
+  }
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename=stay-nestura-${type}-${new Date().toISOString().split('T')[0]}.csv`);
+  res.send(csv);
+});
+
+// --- SYNC DATA TO DATABASE.JS (for deploy persistence) ---
+app.post('/api/data/sync-to-code', (req, res) => {
+  try {
+    const dbPath = path.join(__dirname, 'backend', 'config', 'database.js');
+    let content = fs.readFileSync(dbPath, 'utf8');
+    // Replace guests array
+    content = content.replace(/guests:\s*\[[\s\S]*?\],\n\s*bookings:/, `guests: ${JSON.stringify(store.guests, null, 4).replace(/\n/g, '\n  ')},\n  bookings:`);
+    content = content.replace(/bookings:\s*\[[\s\S]*?\],\n\s*expenses:/, `bookings: ${JSON.stringify(store.bookings.map(b => { const {first_name, last_name, phone, email, advance_paid, ...rest} = b; return rest; }), null, 4).replace(/\n/g, '\n  ')},\n  expenses:`);
+    content = content.replace(/expenses:\s*\[[\s\S]*?\],\n\n/, `expenses: ${JSON.stringify(store.expenses, null, 4).replace(/\n/g, '\n  ')},\n\n`);
+    // Update idCounter
+    const maxId = Math.max(...[...store.properties, ...store.guests, ...store.bookings, ...store.expenses].map(i => i.id || 0));
+    content = content.replace(/let idCounter = \d+;/, `let idCounter = ${maxId + 100};`);
+    fs.writeFileSync(dbPath, content);
+    res.json({ success: true, message: 'Data synced to database.js — ready for git commit & deploy' });
+  } catch (err) {
+    res.status(500).json({ error: 'Sync failed: ' + err.message });
+  }
+});
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });

@@ -676,8 +676,13 @@ const MasterCalendar = () => {
 const Bookings = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [bookings, setBookings] = useState([]);
+  const [allBookings, setAllBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
+  const [filterProperty, setFilterProperty] = useState('');
+  const [filterChannel, setFilterChannel] = useState('');
+  const [filterDateFrom, setFilterDateFrom] = useState('');
+  const [filterDateTo, setFilterDateTo] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
   const [properties, setProperties] = useState([]);
@@ -707,13 +712,24 @@ const Bookings = () => {
 
   useEffect(() => {
     fetchBookings();
-  }, [filter]);
+  }, []);
+
+  useEffect(() => {
+    // Apply all filters client-side
+    let filtered = [...allBookings];
+    if (filter !== 'all') filtered = filtered.filter(b => b.booking_status === filter);
+    if (filterProperty) filtered = filtered.filter(b => b.property_id === parseInt(filterProperty));
+    if (filterChannel) filtered = filtered.filter(b => b.channel === filterChannel);
+    if (filterDateFrom) filtered = filtered.filter(b => b.check_in >= filterDateFrom);
+    if (filterDateTo) filtered = filtered.filter(b => b.check_out <= filterDateTo);
+    setBookings(filtered);
+  }, [filter, filterProperty, filterChannel, filterDateFrom, filterDateTo, allBookings]);
 
   const fetchBookings = async () => {
     try {
-      const params = filter !== 'all' ? { status: filter } : {};
-      const res = await api.get('/bookings', { params });
-      setBookings(res.data.bookings || []);
+      const [bRes, pRes] = await Promise.all([api.get('/bookings', { params: { limit: 500 } }), api.get('/properties')]);
+      setAllBookings(bRes.data.bookings || []);
+      setProperties(pRes.data || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -870,18 +886,42 @@ const Bookings = () => {
       )}
 
       <div className="filters">
-        <button className={`filter-btn ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>
-          All
-        </button>
-        <button className={`filter-btn ${filter === 'confirmed' ? 'active' : ''}`} onClick={() => setFilter('confirmed')}>
-          Confirmed
-        </button>
-        <button className={`filter-btn ${filter === 'checked-in' ? 'active' : ''}`} onClick={() => setFilter('checked-in')}>
-          Checked In
-        </button>
-        <button className={`filter-btn ${filter === 'checked-out' ? 'active' : ''}`} onClick={() => setFilter('checked-out')}>
-          Checked Out
-        </button>
+        <button className={`filter-btn ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>All</button>
+        <button className={`filter-btn ${filter === 'confirmed' ? 'active' : ''}`} onClick={() => setFilter('confirmed')}>Confirmed</button>
+        <button className={`filter-btn ${filter === 'checked-in' ? 'active' : ''}`} onClick={() => setFilter('checked-in')}>Checked In</button>
+        <button className={`filter-btn ${filter === 'checked-out' ? 'active' : ''}`} onClick={() => setFilter('checked-out')}>Checked Out</button>
+        <button className={`filter-btn ${filter === 'cancelled' ? 'active' : ''}`} onClick={() => setFilter('cancelled')}>Cancelled</button>
+      </div>
+      <div className="filter-bar">
+        <div className="filter-group">
+          <label>Property</label>
+          <select value={filterProperty} onChange={e => setFilterProperty(e.target.value)}>
+            <option value="">All Properties</option>
+            {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+        <div className="filter-group">
+          <label>Channel</label>
+          <select value={filterChannel} onChange={e => setFilterChannel(e.target.value)}>
+            <option value="">All Channels</option>
+            <option value="direct">Direct</option>
+            <option value="airbnb">Airbnb</option>
+            <option value="booking.com">Booking.com</option>
+            <option value="makemytrip">MakeMyTrip</option>
+            <option value="goibibo">Goibibo</option>
+          </select>
+        </div>
+        <div className="filter-group">
+          <label>From Date</label>
+          <input type="date" value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)} />
+        </div>
+        <div className="filter-group">
+          <label>To Date</label>
+          <input type="date" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)} />
+        </div>
+        {(filterProperty || filterChannel || filterDateFrom || filterDateTo) && (
+          <button className="btn btn-sm btn-secondary" onClick={() => { setFilterProperty(''); setFilterChannel(''); setFilterDateFrom(''); setFilterDateTo(''); }} style={{ alignSelf: 'flex-end' }}>Clear Filters</button>
+        )}
       </div>
 
       <div className="bookings-list">
@@ -1615,6 +1655,30 @@ const SettingsPage = () => {
             <CheckCircle size={16} /> Imported: {importStatus.imported?.properties || 0} properties, {importStatus.imported?.guests || 0} guests, {importStatus.imported?.bookings || 0} bookings, {importStatus.imported?.expenses || 0} expenses
           </div>
         )}
+      </div>
+
+      <div className="settings-section" style={{ marginTop: '20px' }}>
+        <h2>CSV Export</h2>
+        <p style={{ color: '#6b7280', marginBottom: '16px' }}>Download individual data tables as CSV files for use in Excel or Google Sheets.</p>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+          {['properties', 'bookings', 'guests', 'expenses'].map(type => (
+            <a key={type} href={`/api/data/export/csv/${type}`} download className="btn btn-primary" style={{ textDecoration: 'none' }}>
+              <Download size={16} /> {type.charAt(0).toUpperCase() + type.slice(1)} CSV
+            </a>
+          ))}
+        </div>
+      </div>
+
+      <div className="settings-section" style={{ marginTop: '20px' }}>
+        <h2>Sync Data for Deployment</h2>
+        <p style={{ color: '#6b7280', marginBottom: '16px' }}>Save your current data into the source code so it persists across Render deployments. Run this before committing to Git.</p>
+        <button className="btn btn-primary" onClick={async () => {
+          if (!window.confirm('This will save all current data into database.js source code.\n\nAfter this, commit and push to Git for deployment.\n\nContinue?')) return;
+          try {
+            const res = await api.post('/data/sync-to-code');
+            alert(res.data.message);
+          } catch (err) { alert('Sync failed: ' + err.message); }
+        }}><RefreshCw size={16} /> Sync Data to Code</button>
       </div>
     </div>
   );
