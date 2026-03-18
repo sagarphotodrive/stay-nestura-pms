@@ -828,15 +828,10 @@ const Bookings = () => {
     <div className="bookings-page">
       <div className="page-header">
         <h1>Bookings</h1>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <button className={`btn btn-sm ${hidePast ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setHidePast(!hidePast)}>
-            {hidePast ? 'Show All' : 'Hide Past Bookings'}
-          </button>
-          <button className="btn btn-primary" onClick={openForm}>
-            <Plus size={18} />
-            New Booking
-          </button>
-        </div>
+        <button className="btn btn-primary" onClick={openForm}>
+          <Plus size={18} />
+          New Booking
+        </button>
       </div>
 
       {showForm && (
@@ -936,6 +931,15 @@ const Bookings = () => {
         {(filterProperty || filterChannel || filterDateFrom || filterDateTo) && (
           <button className="btn btn-sm btn-secondary" onClick={() => { setFilterProperty(''); setFilterChannel(''); setFilterDateFrom(''); setFilterDateTo(''); }} style={{ alignSelf: 'flex-end' }}>Clear Filters</button>
         )}
+      </div>
+
+      <div className="bookings-toolbar">
+        <div className="bookings-count">{bookings.length} booking{bookings.length !== 1 ? 's' : ''}</div>
+        <label className="toggle-switch">
+          <input type="checkbox" checked={hidePast} onChange={() => setHidePast(!hidePast)} />
+          <span className="toggle-slider"></span>
+          <span className="toggle-label">Hide past bookings</span>
+        </label>
       </div>
 
       <div className="bookings-list">
