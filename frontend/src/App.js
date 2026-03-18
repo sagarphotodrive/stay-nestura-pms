@@ -270,7 +270,7 @@ const Dashboard = () => {
       <div className="quick-actions">
         <h3>Quick Actions</h3>
         <div className="actions-grid">
-          <Link to="/bookings" className="action-btn">
+          <Link to="/bookings?action=new" className="action-btn">
             <Plus size={20} />
             <span>New Booking</span>
           </Link>
@@ -690,6 +690,7 @@ const Bookings = () => {
   const [filterChannel, setFilterChannel] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
+  const [hidePast, setHidePast] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
   const [properties, setProperties] = useState([]);
@@ -729,8 +730,9 @@ const Bookings = () => {
     if (filterChannel) filtered = filtered.filter(b => b.channel === filterChannel);
     if (filterDateFrom) filtered = filtered.filter(b => b.check_in >= filterDateFrom);
     if (filterDateTo) filtered = filtered.filter(b => b.check_out <= filterDateTo);
+    if (hidePast) { const today = new Date().toISOString().split('T')[0]; filtered = filtered.filter(b => b.check_out >= today || b.booking_status === 'confirmed' || b.booking_status === 'checked_in'); }
     setBookings(filtered);
-  }, [filter, filterProperty, filterChannel, filterDateFrom, filterDateTo, allBookings]);
+  }, [filter, filterProperty, filterChannel, filterDateFrom, filterDateTo, hidePast, allBookings]);
 
   const fetchBookings = async () => {
     try {
@@ -826,10 +828,15 @@ const Bookings = () => {
     <div className="bookings-page">
       <div className="page-header">
         <h1>Bookings</h1>
-        <button className="btn btn-primary" onClick={openForm}>
-          <Plus size={18} />
-          New Booking
-        </button>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <button className={`btn btn-sm ${hidePast ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setHidePast(!hidePast)}>
+            {hidePast ? 'Show All' : 'Hide Past Bookings'}
+          </button>
+          <button className="btn btn-primary" onClick={openForm}>
+            <Plus size={18} />
+            New Booking
+          </button>
+        </div>
       </div>
 
       {showForm && (
@@ -869,7 +876,7 @@ const Bookings = () => {
               <div className="form-row">
                 <div className="form-group"><label>Adults</label><input type="number" min="1" value={bForm.adults} onChange={e => setBForm({...bForm, adults: e.target.value})}/></div>
                 <div className="form-group"><label>Children</label><input type="number" min="0" value={bForm.children} onChange={e => setBForm({...bForm, children: e.target.value})}/></div>
-                <div className="form-group"><label>Channel</label><select value={bForm.channel} onChange={e => setBForm({...bForm, channel: e.target.value})}><option value="direct">Direct</option><option value="airbnb">Airbnb</option><option value="booking.com">Booking.com</option><option value="makemytrip">MakeMyTrip</option><option value="goibibo">Goibibo</option></select></div>
+                <div className="form-group"><label>Channel</label><select value={bForm.channel} onChange={e => setBForm({...bForm, channel: e.target.value})}><option value="direct">Offline</option><option value="airbnb">Airbnb</option><option value="booking.com">Booking.com</option><option value="makemytrip">MakeMyTrip</option><option value="goibibo">Goibibo</option></select></div>
               </div>
 
               <h4 style={{ margin: '12px 0 8px', color: '#94a3b8', fontSize: '14px' }}>Payment Details</h4>
@@ -911,7 +918,7 @@ const Bookings = () => {
           <label>Channel</label>
           <select value={filterChannel} onChange={e => setFilterChannel(e.target.value)}>
             <option value="">All Channels</option>
-            <option value="direct">Direct</option>
+            <option value="direct">Offline</option>
             <option value="airbnb">Airbnb</option>
             <option value="booking.com">Booking.com</option>
             <option value="makemytrip">MakeMyTrip</option>
@@ -954,7 +961,7 @@ const Bookings = () => {
               </div>
               <div className="booking-amount">
                 <span className="amount">₹{parseFloat(booking.gross_amount || booking.net_amount).toLocaleString()}</span>
-                <span className="channel">{booking.channel}</span>
+                <span className="channel">{booking.channel === 'direct' ? 'Offline' : booking.channel}</span>
                 {booking.paid_amount > 0 && <span className="text-success" style={{fontSize:'12px'}}>Paid: ₹{parseFloat(booking.paid_amount).toLocaleString()}</span>}
                 {(booking.pending_amount || 0) > 0 && <span className="text-danger" style={{fontSize:'12px'}}>Due: ₹{parseFloat(booking.pending_amount).toLocaleString()}</span>}
               </div>
@@ -1062,40 +1069,48 @@ const Guests = () => {
         </div>
       )}
 
-      <div className="search-bar">
-        <Search size={20} />
-        <input
-          type="text"
-          placeholder="Search guests by name, email or phone..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+      <div className="guest-filters-bar">
+        <div className="search-bar">
+          <Search size={18} />
+          <input type="text" placeholder="Search by name, email or phone..." value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+        <div className="guest-summary">
+          <span className="guest-count">{guests.length} guests</span>
+          <span className="guest-total-value">Total Lifetime: ₹{guests.reduce((s, g) => s + parseFloat(g.lifetime_value || 0), 0).toLocaleString()}</span>
+        </div>
       </div>
 
-      <div className="guests-grid">
-        {guests.map(guest => (
-          <div key={guest.id} className="guest-card">
-            <div className="guest-avatar" style={{ position: 'relative' }}>
-              {guest.first_name?.[0]}{guest.last_name?.[0]}
-              <button className="btn-icon-sm card-edit-btn" onClick={() => openEdit(guest)} title="Edit"><Edit3 size={12} /></button>
-            </div>
-            <div className="guest-info">
-              <h3>{guest.first_name} {guest.last_name}</h3>
-              <p>{guest.phone}</p>
-              <p>{guest.email}</p>
-            </div>
-            <div className="guest-stats">
-              <div className="guest-stat">
-                <span className="label">Stays</span>
-                <span className="value">{guest.total_stays}</span>
-              </div>
-              <div className="guest-stat">
-                <span className="label">Lifetime</span>
-                <span className="value">₹{parseFloat(guest.lifetime_value || 0).toLocaleString()}</span>
-              </div>
-            </div>
-          </div>
-        ))}
+      <div className="guest-table-wrapper">
+        <table className="guest-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Guest Name</th>
+              <th>Phone</th>
+              <th>Email</th>
+              <th>Nationality</th>
+              <th style={{ textAlign: 'center' }}>Stays</th>
+              <th style={{ textAlign: 'right' }}>Lifetime Value</th>
+              <th>Notes</th>
+              <th style={{ textAlign: 'center' }}>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {guests.map(guest => (
+              <tr key={guest.id}>
+                <td><div className="guest-avatar-sm">{guest.first_name?.[0]}{guest.last_name?.[0]}</div></td>
+                <td className="guest-td-name">{guest.first_name} {guest.last_name}</td>
+                <td className="guest-td-phone">{guest.phone || '-'}</td>
+                <td className="guest-td-email">{guest.email || '-'}</td>
+                <td>{guest.nationality || '-'}</td>
+                <td style={{ textAlign: 'center' }}><span className="guest-stays-badge">{guest.total_stays || 0}</span></td>
+                <td style={{ textAlign: 'right' }} className="guest-td-value">₹{parseFloat(guest.lifetime_value || 0).toLocaleString()}</td>
+                <td className="guest-td-notes">{guest.notes || '-'}</td>
+                <td style={{ textAlign: 'center' }}><button className="btn-icon-sm" onClick={() => openEdit(guest)} title="Edit"><Edit3 size={14} /></button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -1198,38 +1213,55 @@ const Expenses = () => {
       )}
 
       {summary && (
-        <div className="expense-summary">
-          <div className="summary-card">
-            <h3>Total This Month</h3>
-            <span className="amount">₹{parseFloat(summary.total || 0).toLocaleString()}</span>
+        <div className="expense-summary-grid">
+          <div className="expense-total-card">
+            <div className="expense-total-label">Total This Month</div>
+            <div className="expense-total-amount">₹{parseFloat(summary.total || 0).toLocaleString()}</div>
+            <div className="expense-total-count">{expenses.length} transactions</div>
           </div>
-          <div className="summary-breakdown">
-            {summary.byCategory?.slice(0, 5).map(cat => (
-              <div key={cat.category} className="category-item">
-                <span className="category-name">{cat.category}</span>
-                <span className="category-amount">₹{parseFloat(cat.total).toLocaleString()}</span>
+          {summary.byCategory?.slice(0, 5).map(cat => (
+            <div key={cat.category} className="expense-cat-card">
+              <div className="expense-cat-header">
+                <span className="expense-cat-name">{cat.category.replace(/_/g, ' ')}</span>
+                <span className="expense-cat-count">{expenses.filter(e => e.category === cat.category).length} items</span>
               </div>
-            ))}
-          </div>
+              <div className="expense-cat-amount">₹{parseFloat(cat.total).toLocaleString()}</div>
+              <div className="expense-cat-bar"><div className="expense-cat-fill" style={{ width: `${Math.min(100, (cat.total / (summary.total || 1)) * 100)}%` }} /></div>
+            </div>
+          ))}
         </div>
       )}
 
-      <div className="expenses-list">
-        {expenses.map(expense => (
-          <div key={expense.id} className="expense-item">
-            <div className="expense-info">
-              <span className="expense-category">{expense.category}</span>
-              <span className="expense-desc">{expense.description}</span>
-              <span className="expense-property" style={{fontSize:'12px',color:'#94a3b8'}}>{expense.property_id === 0 ? 'Common - Stay Nestura' : expense.property_name || ''}</span>
-              <span className="expense-date">{format(new Date(expense.expense_date), 'MMM dd, yyyy')}</span>
-            </div>
-            <div className="expense-actions">
-              <span className="expense-amount">-₹{parseFloat(expense.amount).toLocaleString()}</span>
-              <button className="btn-icon btn-edit" title="Edit" onClick={() => openEditExp(expense)}><Edit3 size={15}/></button>
-              <button className="btn-icon btn-danger" title="Delete" onClick={() => deleteExpense(expense.id)}><Trash2 size={15}/></button>
-            </div>
-          </div>
-        ))}
+      <div className="expense-table-wrapper">
+        <table className="expense-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Description</th>
+              <th>Category</th>
+              <th>Property</th>
+              <th>Payment</th>
+              <th style={{ textAlign: 'right' }}>Amount</th>
+              <th style={{ textAlign: 'center' }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {expenses.map(expense => (
+              <tr key={expense.id}>
+                <td className="expense-td-date">{format(new Date(expense.expense_date), 'MMM dd, yyyy')}</td>
+                <td className="expense-td-desc">{expense.description}</td>
+                <td><span className={`expense-cat-badge ${expense.category}`}>{expense.category.replace(/_/g, ' ')}</span></td>
+                <td className="expense-td-prop">{expense.property_id === 0 ? 'Common' : expense.property_name || '-'}</td>
+                <td className="expense-td-method">{expense.payment_method}</td>
+                <td className="expense-td-amount">₹{parseFloat(expense.amount).toLocaleString()}</td>
+                <td className="expense-td-actions">
+                  <button className="btn-icon-sm" title="Edit" onClick={() => openEditExp(expense)}><Edit3 size={14}/></button>
+                  <button className="btn-icon-sm" title="Delete" onClick={() => deleteExpense(expense.id)}><Trash2 size={14}/></button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -1712,13 +1744,9 @@ const Layout = () => {
           <a href="/" className="icon-btn" title="Back to Homepage">
             <Home size={20} />
           </a>
-          <button className="icon-btn">
-            <Bell size={20} />
-            <span className="notification-badge">3</span>
-          </button>
-          <button className="icon-btn">
+          <Link to="/settings" className="icon-btn">
             <Settings size={20} />
-          </button>
+          </Link>
         </div>
       </header>
 
