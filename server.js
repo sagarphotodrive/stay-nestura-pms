@@ -666,6 +666,51 @@ app.get('/api/reports/adr', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// --- ICAL EXPORT (generate .ics feed for a property) ---
+app.get('/api/properties/:id/ical.ics', async (req, res) => {
+  try {
+    const propId = parseInt(req.params.id);
+    let prop, bookingsList;
+    if (useMongo) {
+      prop = await Property.findOne({ id: propId }).lean();
+      bookingsList = await Booking.find({ property_id: propId, booking_status: { $nin: ['cancelled'] } }).lean();
+    } else {
+      prop = store.properties.find(p => p.id === propId);
+      bookingsList = (store.bookings || []).filter(b => b.property_id === propId && b.booking_status !== 'cancelled');
+    }
+    if (!prop) return res.status(404).send('Property not found');
+
+    const formatDate = (d) => d.replace(/-/g, '');
+    const now = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+    const host = req.get('host');
+
+    let ics = 'BEGIN:VCALENDAR\r\n';
+    ics += 'VERSION:2.0\r\n';
+    ics += 'PRODID:-//Stay Nestura PMS//EN\r\n';
+    ics += `X-WR-CALNAME:${prop.name}\r\n`;
+    ics += 'METHOD:PUBLISH\r\n';
+
+    for (const b of bookingsList) {
+      const dtStart = formatDate(b.check_in);
+      const dtEnd = formatDate(b.check_out);
+      ics += 'BEGIN:VEVENT\r\n';
+      ics += `DTSTART;VALUE=DATE:${dtStart}\r\n`;
+      ics += `DTEND;VALUE=DATE:${dtEnd}\r\n`;
+      ics += `DTSTAMP:${now}\r\n`;
+      ics += `UID:booking-${b.id}@${host}\r\n`;
+      ics += `SUMMARY:${b.channel === 'direct' ? 'Direct Booking' : b.channel} - Reserved\r\n`;
+      ics += `DESCRIPTION:Booking #${b.id} | ${b.channel} | ${b.payment_status || 'unknown'}\r\n`;
+      ics += 'STATUS:CONFIRMED\r\n';
+      ics += 'END:VEVENT\r\n';
+    }
+
+    ics += 'END:VCALENDAR\r\n';
+    res.set('Content-Type', 'text/calendar; charset=utf-8');
+    res.set('Content-Disposition', `inline; filename="${prop.name.replace(/[^a-zA-Z0-9]/g, '_')}.ics"`);
+    res.send(ics);
+  } catch (err) { res.status(500).send('Error generating calendar'); }
+});
+
 // --- ICAL LINKS ---
 app.get('/api/ical-links', (req, res) => {
   let links = store.ical_links || [];

@@ -9,7 +9,7 @@ import {
   Plus, Search, ChevronRight, Home, LogOut,
   RefreshCw, TrendingUp, UserCheck,
   UserX, AlertCircle, CheckCircle, Clock, Link2, Trash2, ExternalLink, Edit3,
-  Download, Upload
+  Download, Upload, Copy
 } from 'lucide-react';
 
 // API Configuration
@@ -609,9 +609,16 @@ const MasterCalendar = () => {
           <div className="ical-content">
             {properties.map(prop => {
               const propLinks = icalLinks.filter(l => l.property_id === prop.id);
+              const exportUrl = `${api.defaults.baseURL.replace('/api', '')}/api/properties/${prop.id}/ical.ics`;
               return (
                 <div key={prop.id} className="ical-property">
                   <h4>{prop.name}</h4>
+                  <div className="ical-export-url">
+                    <span className="channel-tag direct">Export Feed</span>
+                    <input readOnly value={exportUrl} className="ical-url-input" onClick={e => e.target.select()} />
+                    <button className="btn-icon-sm" title="Copy URL" onClick={() => { navigator.clipboard.writeText(exportUrl); }}><Copy size={14} /></button>
+                    <a href={exportUrl} target="_blank" rel="noopener noreferrer" className="ical-url-link" title="Preview"><ExternalLink size={14} /></a>
+                  </div>
                   {propLinks.length > 0 ? (
                     <div className="ical-links-list">
                       {propLinks.map(link => (
@@ -626,7 +633,7 @@ const MasterCalendar = () => {
                       ))}
                     </div>
                   ) : (
-                    <p className="empty-state-sm">No calendar links added</p>
+                    <p className="empty-state-sm">No OTA calendar links imported yet</p>
                   )}
                 </div>
               );
