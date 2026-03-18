@@ -1120,17 +1120,34 @@ const Guests = () => {
 const Expenses = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [expenses, setExpenses] = useState([]);
+  const [allExpenses, setAllExpenses] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
   const [properties, setProperties] = useState([]);
+  const [expFilterCategory, setExpFilterCategory] = useState('');
+  const [expFilterProperty, setExpFilterProperty] = useState('');
+  const [expFilterDateFrom, setExpFilterDateFrom] = useState('');
+  const [expFilterDateTo, setExpFilterDateTo] = useState('');
+  const [expFilterPayment, setExpFilterPayment] = useState('');
   const emptyEForm = { property_id: '', category: 'cleaning', description: '', amount: '', payment_method: 'cash', vendor_name: '', expense_date: new Date().toISOString().split('T')[0] };
   const [eForm, setEForm] = useState(emptyEForm);
 
   useEffect(() => {
     fetchExpenses();
+    api.get('/properties').then(res => setProperties(res.data || [])).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    let filtered = [...allExpenses];
+    if (expFilterCategory) filtered = filtered.filter(e => e.category === expFilterCategory);
+    if (expFilterProperty) filtered = filtered.filter(e => String(e.property_id) === expFilterProperty);
+    if (expFilterDateFrom) filtered = filtered.filter(e => e.expense_date >= expFilterDateFrom);
+    if (expFilterDateTo) filtered = filtered.filter(e => e.expense_date <= expFilterDateTo);
+    if (expFilterPayment) filtered = filtered.filter(e => e.payment_method === expFilterPayment);
+    setExpenses(filtered);
+  }, [expFilterCategory, expFilterProperty, expFilterDateFrom, expFilterDateTo, expFilterPayment, allExpenses]);
   useEffect(() => {
     if (searchParams.get('action') === 'new') { openExpForm(); setSearchParams({}, { replace: true }); }
   }, []);
@@ -1141,7 +1158,9 @@ const Expenses = () => {
         api.get('/expenses'),
         api.get('/expenses/summary')
       ]);
-      setExpenses(expRes.data.expenses || []);
+      const exps = expRes.data.expenses || [];
+      setAllExpenses(exps);
+      setExpenses(exps);
       setSummary(sumRes.data);
     } catch (err) {
       console.error(err);
@@ -1231,6 +1250,56 @@ const Expenses = () => {
           ))}
         </div>
       )}
+
+      <div className="filter-bar">
+        <div className="filter-group">
+          <label>Category</label>
+          <select value={expFilterCategory} onChange={e => setExpFilterCategory(e.target.value)}>
+            <option value="">All Categories</option>
+            <option value="cleaning">Cleaning</option>
+            <option value="electricity">Electricity</option>
+            <option value="water">Water</option>
+            <option value="laundry">Laundry</option>
+            <option value="maintenance">Maintenance</option>
+            <option value="internet">Internet</option>
+            <option value="supplies">Supplies</option>
+            <option value="groceries">Groceries</option>
+            <option value="staff_salary">Staff Salary</option>
+            <option value="travel">Travel</option>
+            <option value="marketing">Marketing</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div className="filter-group">
+          <label>Property</label>
+          <select value={expFilterProperty} onChange={e => setExpFilterProperty(e.target.value)}>
+            <option value="">All Properties</option>
+            <option value="0">Common</option>
+            {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+        <div className="filter-group">
+          <label>Payment</label>
+          <select value={expFilterPayment} onChange={e => setExpFilterPayment(e.target.value)}>
+            <option value="">All Methods</option>
+            <option value="cash">Cash</option>
+            <option value="UPI">UPI</option>
+            <option value="bank_transfer">Bank Transfer</option>
+            <option value="card">Card</option>
+          </select>
+        </div>
+        <div className="filter-group">
+          <label>From Date</label>
+          <input type="date" value={expFilterDateFrom} onChange={e => setExpFilterDateFrom(e.target.value)} />
+        </div>
+        <div className="filter-group">
+          <label>To Date</label>
+          <input type="date" value={expFilterDateTo} onChange={e => setExpFilterDateTo(e.target.value)} />
+        </div>
+        {(expFilterCategory || expFilterProperty || expFilterDateFrom || expFilterDateTo || expFilterPayment) && (
+          <button className="btn btn-sm btn-secondary" onClick={() => { setExpFilterCategory(''); setExpFilterProperty(''); setExpFilterDateFrom(''); setExpFilterDateTo(''); setExpFilterPayment(''); }} style={{ alignSelf: 'flex-end' }}>Clear Filters</button>
+        )}
+      </div>
 
       <div className="expense-table-wrapper">
         <table className="expense-table">
