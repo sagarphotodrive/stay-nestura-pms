@@ -1,5 +1,6 @@
 // Stay Nestura Properties Management System
 // Main Server Entry Point
+// MongoDB Atlas connected
 
 const express = require('express');
 const cors = require('cors');
