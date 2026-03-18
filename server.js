@@ -11,54 +11,16 @@ const fs = require('fs');
 const { Server } = require('socket.io');
 require('dotenv').config();
 
-// Import in-memory data store
+// Import in-memory data store (fallback when no MongoDB)
 const { store } = require('./backend/config/database');
 
-// ============ FILE-BASED PERSISTENCE ============
-const DATA_FILE = path.join(__dirname, 'data', 'store.json');
+// MongoDB support
+const { connectDB, isMongoConnected } = require('./backend/config/mongoose');
+const { Property, Guest, Booking, Expense, ChannelAccount, User, Availability, SyncLog, Counter } = require('./backend/models');
 
-// Load persisted data on startup
-function loadPersistedData() {
-  try {
-    if (fs.existsSync(DATA_FILE)) {
-      const raw = fs.readFileSync(DATA_FILE, 'utf8');
-      const saved = JSON.parse(raw);
-      if (saved.properties && saved.properties.length > 0) store.properties = saved.properties;
-      if (saved.guests) store.guests = saved.guests;
-      if (saved.bookings) store.bookings = saved.bookings;
-      if (saved.expenses) store.expenses = saved.expenses;
-      if (saved.ical_links) store.ical_links = saved.ical_links;
-      if (saved.sync_logs) store.sync_logs = saved.sync_logs;
-      if (saved._idCounter) _idCounter = saved._idCounter;
-      console.log('[Persistence] Loaded data from disk');
-    }
-  } catch (err) {
-    console.log('[Persistence] No saved data found, starting fresh');
-  }
-}
-
-// Save data to disk (debounced)
-let _saveTimer = null;
-function persistData() {
-  if (_saveTimer) clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(() => {
-    try {
-      const dir = path.dirname(DATA_FILE);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      const toSave = {
-        properties: store.properties,
-        guests: store.guests,
-        bookings: store.bookings,
-        expenses: store.expenses,
-        ical_links: store.ical_links,
-        sync_logs: store.sync_logs,
-        _idCounter
-      };
-      fs.writeFileSync(DATA_FILE, JSON.stringify(toSave, null, 2));
-    } catch (err) {
-      console.error('[Persistence] Save error:', err.message);
-    }
-  }, 500);
+// Helper: get next auto-increment ID for MongoDB
+async function nextId(collection) {
+  return Counter.getNextId(collection);
 }
 
 // Import auth route (has demo login)
@@ -88,344 +50,619 @@ app.set('io', io);
 // Auth route
 app.use('/api/auth', authRoutes);
 
-// ============ IN-MEMORY API ROUTES ============
-let _idCounter = 200;
+// ============ API ROUTES (MongoDB or In-Memory) ============
+let _idCounter = 500;
 const _nextId = () => ++_idCounter;
 
-// Load persisted data before serving requests
-loadPersistedData();
-
-// Auto-persist after any mutation
-app.use((req, res, next) => {
-  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
-    const origJson = res.json.bind(res);
-    res.json = (data) => { persistData(); return origJson(data); };
-  }
-  next();
-});
+// useMongo flag — set after connectDB() resolves
+let useMongo = false;
 
 // --- PROPERTIES ---
-app.get('/api/properties', (req, res) => {
-  const active = store.properties.filter(p => p.is_active !== false);
-  const enriched = active.map(p => {
-    const bks = store.bookings.filter(b => b.property_id === p.id && b.booking_status !== 'cancelled');
-    return { ...p, current_bookings: bks.length, month_revenue: bks.reduce((s,b) => s + (b.net_amount||0), 0) };
-  });
-  res.json(enriched);
+app.get('/api/properties', async (req, res) => {
+  try {
+    if (useMongo) {
+      const props = await Property.find({ is_active: true }).lean();
+      const bookings = await Booking.find({ booking_status: { $ne: 'cancelled' } }).lean();
+      const enriched = props.map(p => {
+        const bks = bookings.filter(b => b.property_id === p.id);
+        return { ...p, current_bookings: bks.length, month_revenue: bks.reduce((s,b) => s + (b.net_amount||0), 0) };
+      });
+      return res.json(enriched);
+    }
+    const active = store.properties.filter(p => p.is_active !== false);
+    const enriched = active.map(p => {
+      const bks = store.bookings.filter(b => b.property_id === p.id && b.booking_status !== 'cancelled');
+      return { ...p, current_bookings: bks.length, month_revenue: bks.reduce((s,b) => s + (b.net_amount||0), 0) };
+    });
+    res.json(enriched);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.get('/api/properties/:id', (req, res) => {
-  const prop = store.properties.find(p => p.id == req.params.id);
-  if (!prop) return res.status(404).json({ error: 'Not found' });
-  const avail = store.availability.filter(a => a.property_id === prop.id);
-  res.json({ ...prop, availability: avail });
+app.get('/api/properties/:id', async (req, res) => {
+  try {
+    if (useMongo) {
+      const prop = await Property.findOne({ id: parseInt(req.params.id) }).lean();
+      if (!prop) return res.status(404).json({ error: 'Not found' });
+      const avail = await Availability.find({ property_id: prop.id }).lean();
+      return res.json({ ...prop, availability: avail });
+    }
+    const prop = store.properties.find(p => p.id == req.params.id);
+    if (!prop) return res.status(404).json({ error: 'Not found' });
+    const avail = store.availability.filter(a => a.property_id === prop.id);
+    res.json({ ...prop, availability: avail });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.post('/api/properties', (req, res) => {
-  const b = req.body;
-  const prop = { id: _nextId(), name: b.name, property_type: b.property_type || 'Homestay', address: b.address, city: b.city, state: b.state, pincode: b.pincode, total_rooms: b.total_rooms || 1, max_guests: b.max_guests || 2, base_price: b.base_price || 0, description: b.description, amenities: b.amenities || [], images: b.images || [], latitude: b.latitude, longitude: b.longitude, google_maps_link: b.google_maps_link, is_active: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
-  store.properties.push(prop);
-  for (let i = 0; i < 60; i++) { const d = new Date(); d.setDate(d.getDate()+i); store.availability.push({ id: _nextId(), property_id: prop.id, date: d.toISOString().split('T')[0], rooms_available: prop.total_rooms, is_blocked: false, blocked_reason: null, min_stay: 1, max_stay: 30, closed_to_arrival: false, closed_to_departure: false, updated_at: new Date().toISOString() }); }
-  res.status(201).json(prop);
+app.post('/api/properties', async (req, res) => {
+  try {
+    const b = req.body;
+    if (useMongo) {
+      const id = await nextId('properties');
+      const prop = await Property.create({ id, name: b.name, property_type: b.property_type || 'Homestay', address: b.address, city: b.city, state: b.state, pincode: b.pincode, total_rooms: b.total_rooms || 1, max_guests: b.max_guests || 2, base_price: b.base_price || 0, description: b.description, amenities: b.amenities || [], images: b.images || [], latitude: b.latitude, longitude: b.longitude, google_maps_link: b.google_maps_link, is_active: true });
+      const availDocs = [];
+      for (let i = 0; i < 60; i++) { const d = new Date(); d.setDate(d.getDate()+i); const aid = await nextId('availability'); availDocs.push({ id: aid, property_id: prop.id, date: d.toISOString().split('T')[0], rooms_available: prop.total_rooms, is_blocked: false, min_stay: 1, max_stay: 30 }); }
+      await Availability.insertMany(availDocs);
+      return res.status(201).json(prop.toObject());
+    }
+    const prop = { id: _nextId(), name: b.name, property_type: b.property_type || 'Homestay', address: b.address, city: b.city, state: b.state, pincode: b.pincode, total_rooms: b.total_rooms || 1, max_guests: b.max_guests || 2, base_price: b.base_price || 0, description: b.description, amenities: b.amenities || [], images: b.images || [], latitude: b.latitude, longitude: b.longitude, google_maps_link: b.google_maps_link, is_active: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+    store.properties.push(prop);
+    for (let i = 0; i < 60; i++) { const d = new Date(); d.setDate(d.getDate()+i); store.availability.push({ id: _nextId(), property_id: prop.id, date: d.toISOString().split('T')[0], rooms_available: prop.total_rooms, is_blocked: false, blocked_reason: null, min_stay: 1, max_stay: 30, closed_to_arrival: false, closed_to_departure: false, updated_at: new Date().toISOString() }); }
+    res.status(201).json(prop);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.put('/api/properties/:id', (req, res) => {
-  const prop = store.properties.find(p => p.id == req.params.id);
-  if (!prop) return res.status(404).json({ error: 'Not found' });
-  Object.assign(prop, req.body, { updated_at: new Date().toISOString() });
-  res.json(prop);
+app.put('/api/properties/:id', async (req, res) => {
+  try {
+    if (useMongo) {
+      const prop = await Property.findOneAndUpdate({ id: parseInt(req.params.id) }, { $set: req.body }, { new: true }).lean();
+      if (!prop) return res.status(404).json({ error: 'Not found' });
+      return res.json(prop);
+    }
+    const prop = store.properties.find(p => p.id == req.params.id);
+    if (!prop) return res.status(404).json({ error: 'Not found' });
+    Object.assign(prop, req.body, { updated_at: new Date().toISOString() });
+    res.json(prop);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.delete('/api/properties/:id', (req, res) => {
-  const prop = store.properties.find(p => p.id == req.params.id);
-  if (prop) prop.is_active = false;
-  res.json({ message: 'Deleted' });
+app.delete('/api/properties/:id', async (req, res) => {
+  try {
+    if (useMongo) {
+      await Property.findOneAndUpdate({ id: parseInt(req.params.id) }, { is_active: false });
+      return res.json({ message: 'Deleted' });
+    }
+    const prop = store.properties.find(p => p.id == req.params.id);
+    if (prop) prop.is_active = false;
+    res.json({ message: 'Deleted' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.get('/api/properties/:id/calendar', (req, res) => {
-  const { start, end } = req.query;
-  let avail = store.availability.filter(a => a.property_id == req.params.id);
-  if (start) avail = avail.filter(a => a.date >= start);
-  if (end) avail = avail.filter(a => a.date <= end);
-  res.json(avail);
+app.get('/api/properties/:id/calendar', async (req, res) => {
+  try {
+    const { start, end } = req.query;
+    if (useMongo) {
+      const filter = { property_id: parseInt(req.params.id) };
+      if (start) filter.date = { ...filter.date, $gte: start };
+      if (end) filter.date = { ...filter.date, $lte: end };
+      return res.json(await Availability.find(filter).lean());
+    }
+    let avail = store.availability.filter(a => a.property_id == req.params.id);
+    if (start) avail = avail.filter(a => a.date >= start);
+    if (end) avail = avail.filter(a => a.date <= end);
+    res.json(avail);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.post('/api/properties/:id/block', (req, res) => {
-  const { start_date, end_date, reason } = req.body;
-  store.availability.forEach(a => { if (a.property_id == req.params.id && a.date >= start_date && a.date <= end_date) { a.is_blocked = true; a.blocked_reason = reason; } });
-  res.json({ message: 'Dates blocked' });
+app.post('/api/properties/:id/block', async (req, res) => {
+  try {
+    const { start_date, end_date, reason } = req.body;
+    if (useMongo) {
+      await Availability.updateMany({ property_id: parseInt(req.params.id), date: { $gte: start_date, $lte: end_date } }, { is_blocked: true, blocked_reason: reason });
+      return res.json({ message: 'Dates blocked' });
+    }
+    store.availability.forEach(a => { if (a.property_id == req.params.id && a.date >= start_date && a.date <= end_date) { a.is_blocked = true; a.blocked_reason = reason; } });
+    res.json({ message: 'Dates blocked' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.post('/api/properties/:id/rates', (req, res) => {
-  const { rates } = req.body;
-  if (rates) rates.forEach(r => { const a = store.availability.find(av => av.property_id == req.params.id && av.date === r.date); if (a) { a.rooms_available = r.rate || a.rooms_available; a.min_stay = r.min_stay || a.min_stay; a.max_stay = r.max_stay || a.max_stay; } });
-  res.json({ message: 'Rates updated' });
+app.post('/api/properties/:id/rates', async (req, res) => {
+  try {
+    const { rates } = req.body;
+    if (useMongo && rates) {
+      for (const r of rates) { await Availability.findOneAndUpdate({ property_id: parseInt(req.params.id), date: r.date }, { rooms_available: r.rate, min_stay: r.min_stay, max_stay: r.max_stay }); }
+      return res.json({ message: 'Rates updated' });
+    }
+    if (rates) rates.forEach(r => { const a = store.availability.find(av => av.property_id == req.params.id && av.date === r.date); if (a) { a.rooms_available = r.rate || a.rooms_available; a.min_stay = r.min_stay || a.min_stay; a.max_stay = r.max_stay || a.max_stay; } });
+    res.json({ message: 'Rates updated' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // --- BOOKINGS ---
-app.get('/api/bookings/today', (req, res) => {
-  const today = new Date().toISOString().split('T')[0];
-  const enrich = b => { const p = store.properties.find(pr => pr.id === b.property_id) || {}; const g = store.guests.find(gs => gs.id === b.guest_id) || {}; return { ...b, property_name: p.name, address: p.address, google_maps_link: p.google_maps_link, first_name: g.first_name, last_name: g.last_name, phone: g.phone, guests: (b.adults||0)+(b.children||0) }; };
-  res.json({ checkIns: store.bookings.filter(b => b.check_in === today && b.booking_status !== 'cancelled').map(enrich), checkOuts: store.bookings.filter(b => b.check_out === today && b.booking_status !== 'cancelled').map(enrich) });
-});
-app.get('/api/bookings/stats/overview', (req, res) => {
-  const bks = store.bookings.filter(b => b.booking_status !== 'cancelled');
-  res.json({ summary: { total_bookings: bks.length, cancelled_bookings: store.bookings.filter(b => b.booking_status === 'cancelled').length, total_gross: bks.reduce((s,b) => s+b.gross_amount, 0), total_commission: bks.reduce((s,b) => s+b.commission_amount, 0), total_net: bks.reduce((s,b) => s+b.net_amount, 0), confirmed_bookings: bks.length, unique_guests: new Set(bks.map(b => b.guest_id)).size }, occupancy: store.properties.filter(p => p.is_active).map(p => ({ property_id: p.id, property_name: p.name, total_nights_booked: bks.filter(b => b.property_id === p.id).length, total_nights_available: p.total_rooms * 30, occupancy_percent: Math.round(bks.filter(b => b.property_id === p.id).length / (p.total_rooms * 30) * 100) })) });
-});
-app.get('/api/bookings/:id', (req, res) => {
-  const b = store.bookings.find(bk => bk.id == req.params.id);
-  if (!b) return res.status(404).json({ error: 'Not found' });
-  const p = store.properties.find(pr => pr.id === b.property_id) || {};
-  const g = store.guests.find(gs => gs.id === b.guest_id) || {};
-  res.json({ ...b, property_name: p.name, first_name: g.first_name, last_name: g.last_name, email: g.email, phone: g.phone, messages: [] });
-});
-app.get('/api/bookings', (req, res) => {
-  let bks = [...store.bookings];
-  if (req.query.property_id) bks = bks.filter(b => b.property_id == req.query.property_id);
-  if (req.query.status) bks = bks.filter(b => b.booking_status === req.query.status);
-  if (req.query.channel) bks = bks.filter(b => b.channel === req.query.channel);
-  const enriched = bks.map(b => { const p = store.properties.find(pr => pr.id === b.property_id) || {}; const g = store.guests.find(gs => gs.id === b.guest_id) || {}; return { ...b, property_name: p.name, first_name: g.first_name, last_name: g.last_name, email: g.email, phone: g.phone }; });
-  const page = parseInt(req.query.page) || 1; const limit = parseInt(req.query.limit) || 20;
-  res.json({ bookings: enriched.slice((page-1)*limit, page*limit), total: enriched.length, page, pages: Math.ceil(enriched.length/limit) });
-});
-app.get('/api/bookings/check-availability', (req, res) => {
-  const { property_id, check_in, check_out } = req.query;
-  if (!property_id || !check_in || !check_out) return res.json({ available: true, conflicts: [] });
-  const conflicts = store.bookings.filter(b =>
-    b.property_id == property_id && b.booking_status !== 'cancelled' &&
-    b.check_in < check_out && b.check_out > check_in
-  ).map(b => {
-    const g = store.guests.find(gs => gs.id === b.guest_id) || {};
-    return { id: b.id, guest_name: `${g.first_name || ''} ${g.last_name || ''}`.trim(), check_in: b.check_in, check_out: b.check_out, channel: b.channel };
-  });
-  res.json({ available: conflicts.length === 0, conflicts });
-});
-app.post('/api/bookings', (req, res) => {
-  const b = req.body;
-  // Guest dedup: match on (first_name + last_name + phone + email)
-  let guestId = b.guest_id ? parseInt(b.guest_id) : null;
-  if (!guestId && (b.first_name || b.phone)) {
-    const key = [(b.first_name||'').trim().toLowerCase(), (b.last_name||'').trim().toLowerCase(), (b.phone||'').trim(), (b.email||'').trim().toLowerCase()].join('|');
-    let guest = store.guests.find(g => {
-      const gKey = [(g.first_name||'').trim().toLowerCase(), (g.last_name||'').trim().toLowerCase(), (g.phone||'').trim(), (g.email||'').trim().toLowerCase()].join('|');
-      return gKey === key;
-    });
-    if (!guest) {
-      guest = { id: _nextId(), first_name: (b.first_name||'').trim(), last_name: (b.last_name||'').trim(), email: (b.email||'').trim(), phone: (b.phone||'').trim(), id_proof_type: null, id_proof_number: null, id_proof_encrypted: null, address: '', date_of_birth: null, nationality: 'Indian', total_stays: 0, total_spent: 0, lifetime_value: 0, preferences: '', notes: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
-      store.guests.push(guest);
+// Helper: enrich booking with property/guest names
+async function enrichBooking(b, propsCache, guestsCache) {
+  const p = propsCache ? propsCache.find(pr => pr.id === b.property_id) : (useMongo ? await Property.findOne({ id: b.property_id }).lean() : store.properties.find(pr => pr.id === b.property_id)) || {};
+  const g = guestsCache ? guestsCache.find(gs => gs.id === b.guest_id) : (useMongo ? await Guest.findOne({ id: b.guest_id }).lean() : store.guests.find(gs => gs.id === b.guest_id)) || {};
+  return { ...b, property_name: p.name, address: p.address, google_maps_link: p.google_maps_link, first_name: g.first_name, last_name: g.last_name, email: g.email, phone: g.phone, guests: (b.adults||0)+(b.children||0) };
+}
+
+app.get('/api/bookings/today', async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    let checkIns, checkOuts, props, guests;
+    if (useMongo) {
+      [checkIns, checkOuts, props, guests] = await Promise.all([
+        Booking.find({ check_in: today, booking_status: { $ne: 'cancelled' } }).lean(),
+        Booking.find({ check_out: today, booking_status: { $ne: 'cancelled' } }).lean(),
+        Property.find().lean(), Guest.find().lean()
+      ]);
+    } else {
+      checkIns = store.bookings.filter(b => b.check_in === today && b.booking_status !== 'cancelled');
+      checkOuts = store.bookings.filter(b => b.check_out === today && b.booking_status !== 'cancelled');
+      props = store.properties; guests = store.guests;
     }
-    guestId = guest.id;
-  }
-  const nights = Math.max(1, Math.ceil((new Date(b.check_out) - new Date(b.check_in)) / 86400000));
-  const subtotal = (b.nightly_rate || 0) * nights;
-  const gross = (b.gross_amount || subtotal + (b.cleaning_fee||0) + (b.service_fee||0) + (b.taxes||0));
-  const commPct = b.channel === 'airbnb' ? 3 : b.channel === 'booking.com' ? 15 : 0;
-  const commAmt = Math.round(gross * commPct / 100);
-  const booking = { id: _nextId(), property_id: parseInt(b.property_id), guest_id: guestId, channel: b.channel || 'direct', channel_booking_id: b.channel_booking_id, check_in: b.check_in, check_out: b.check_out, adults: b.adults || 1, children: b.children || 0, infants: b.infants || 0, nightly_rate: b.nightly_rate || 0, subtotal, cleaning_fee: b.cleaning_fee || 0, service_fee: b.service_fee || 0, taxes: b.taxes || 0, gross_amount: gross, commission_percent: commPct, commission_amount: commAmt, net_amount: gross - commAmt, currency: 'INR', payment_status: b.payment_status || 'pending', payment_method: b.payment_method, paid_amount: b.paid_amount || 0, pending_amount: gross - (b.paid_amount || 0), booking_status: 'confirmed', guest_message: b.guest_message || '', special_requests: b.special_requests || '', check_in_time: b.check_in_time || '2:00 PM', check_out_time: b.check_out_time || '11:00 AM', actual_check_in: null, actual_check_out: null, confirmed_at: new Date().toISOString(), cancelled_at: null, cancellation_reason: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
-  store.bookings.push(booking);
-  const g = store.guests.find(gs => gs.id === booking.guest_id);
-  if (g) { g.total_stays++; g.total_spent += booking.net_amount; g.lifetime_value += booking.net_amount; }
-  res.status(201).json(booking);
+    res.json({ checkIns: await Promise.all(checkIns.map(b => enrichBooking(b, props, guests))), checkOuts: await Promise.all(checkOuts.map(b => enrichBooking(b, props, guests))) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.patch('/api/bookings/:id/status', (req, res) => {
-  const b = store.bookings.find(bk => bk.id == req.params.id);
-  if (!b) return res.status(404).json({ error: 'Not found' });
-  b.booking_status = req.body.status; b.updated_at = new Date().toISOString();
-  if (req.body.status === 'checked-in') b.actual_check_in = new Date().toISOString();
-  if (req.body.status === 'checked-out') b.actual_check_out = new Date().toISOString();
-  if (req.body.status === 'cancelled') { b.cancelled_at = new Date().toISOString(); b.cancellation_reason = req.body.cancellation_reason; }
-  res.json(b);
+app.get('/api/bookings/stats/overview', async (req, res) => {
+  try {
+    let bks, allBks, props;
+    if (useMongo) {
+      [allBks, props] = await Promise.all([Booking.find().lean(), Property.find({ is_active: true }).lean()]);
+      bks = allBks.filter(b => b.booking_status !== 'cancelled');
+    } else {
+      allBks = store.bookings; bks = allBks.filter(b => b.booking_status !== 'cancelled');
+      props = store.properties.filter(p => p.is_active);
+    }
+    res.json({ summary: { total_bookings: bks.length, cancelled_bookings: allBks.filter(b => b.booking_status === 'cancelled').length, total_gross: bks.reduce((s,b) => s+b.gross_amount, 0), total_commission: bks.reduce((s,b) => s+b.commission_amount, 0), total_net: bks.reduce((s,b) => s+b.net_amount, 0), confirmed_bookings: bks.length, unique_guests: new Set(bks.map(b => b.guest_id)).size }, occupancy: props.map(p => ({ property_id: p.id, property_name: p.name, total_nights_booked: bks.filter(b => b.property_id === p.id).length, total_nights_available: p.total_rooms * 30, occupancy_percent: Math.round(bks.filter(b => b.property_id === p.id).length / (p.total_rooms * 30) * 100) })) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.put('/api/bookings/:id', (req, res) => {
-  const b = store.bookings.find(bk => bk.id == req.params.id);
-  if (!b) return res.status(404).json({ error: 'Not found' });
-  Object.assign(b, req.body, { updated_at: new Date().toISOString() });
-  res.json(b);
+app.get('/api/bookings/:id', async (req, res) => {
+  try {
+    let b;
+    if (useMongo) { b = await Booking.findOne({ id: parseInt(req.params.id) }).lean(); }
+    else { b = store.bookings.find(bk => bk.id == req.params.id); }
+    if (!b) return res.status(404).json({ error: 'Not found' });
+    const enriched = await enrichBooking(b);
+    res.json({ ...enriched, messages: [] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.patch('/api/bookings/:id/payment', (req, res) => {
-  const b = store.bookings.find(bk => bk.id == req.params.id);
-  if (!b) return res.status(404).json({ error: 'Not found' });
-  const amount = parseFloat(req.body.amount) || 0;
-  b.paid_amount = (b.paid_amount || 0) + amount;
-  b.pending_amount = (b.gross_amount || 0) - b.paid_amount;
-  if (b.pending_amount <= 0) { b.pending_amount = 0; b.payment_status = 'paid'; }
-  else { b.payment_status = 'partial'; }
-  b.updated_at = new Date().toISOString();
-  res.json(b);
+app.get('/api/bookings', async (req, res) => {
+  try {
+    let bks, props, guests;
+    if (useMongo) {
+      const filter = {};
+      if (req.query.property_id) filter.property_id = parseInt(req.query.property_id);
+      if (req.query.status) filter.booking_status = req.query.status;
+      if (req.query.channel) filter.channel = req.query.channel;
+      [bks, props, guests] = await Promise.all([Booking.find(filter).lean(), Property.find().lean(), Guest.find().lean()]);
+    } else {
+      bks = [...store.bookings];
+      if (req.query.property_id) bks = bks.filter(b => b.property_id == req.query.property_id);
+      if (req.query.status) bks = bks.filter(b => b.booking_status === req.query.status);
+      if (req.query.channel) bks = bks.filter(b => b.channel === req.query.channel);
+      props = store.properties; guests = store.guests;
+    }
+    const enriched = bks.map(b => { const p = (props || []).find(pr => pr.id === b.property_id) || {}; const g = (guests || []).find(gs => gs.id === b.guest_id) || {}; return { ...b, property_name: p.name, first_name: g.first_name, last_name: g.last_name, email: g.email, phone: g.phone }; });
+    const page = parseInt(req.query.page) || 1; const limit = parseInt(req.query.limit) || 20;
+    res.json({ bookings: enriched.slice((page-1)*limit, page*limit), total: enriched.length, page, pages: Math.ceil(enriched.length/limit) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.post('/api/bookings/:id/cancel', (req, res) => {
-  const b = store.bookings.find(bk => bk.id == req.params.id);
-  if (!b) return res.status(404).json({ error: 'Not found' });
-  b.booking_status = 'cancelled'; b.cancelled_at = new Date().toISOString(); b.cancellation_reason = req.body.cancellation_reason || 'Cancelled';
-  res.json(b);
+app.get('/api/bookings/check-availability', async (req, res) => {
+  try {
+    const { property_id, check_in, check_out } = req.query;
+    if (!property_id || !check_in || !check_out) return res.json({ available: true, conflicts: [] });
+    let conflictBookings;
+    if (useMongo) {
+      conflictBookings = await Booking.find({ property_id: parseInt(property_id), booking_status: { $ne: 'cancelled' }, check_in: { $lt: check_out }, check_out: { $gt: check_in } }).lean();
+    } else {
+      conflictBookings = store.bookings.filter(b => b.property_id == property_id && b.booking_status !== 'cancelled' && b.check_in < check_out && b.check_out > check_in);
+    }
+    const guestsList = useMongo ? await Guest.find().lean() : store.guests;
+    const conflicts = conflictBookings.map(b => { const g = guestsList.find(gs => gs.id === b.guest_id) || {}; return { id: b.id, guest_name: `${g.first_name || ''} ${g.last_name || ''}`.trim(), check_in: b.check_in, check_out: b.check_out, channel: b.channel }; });
+    res.json({ available: conflicts.length === 0, conflicts });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.post('/api/bookings', async (req, res) => {
+  try {
+    const b = req.body;
+    let guestId = b.guest_id ? parseInt(b.guest_id) : null;
+    if (!guestId && (b.first_name || b.phone)) {
+      const key = [(b.first_name||'').trim().toLowerCase(), (b.last_name||'').trim().toLowerCase(), (b.phone||'').trim(), (b.email||'').trim().toLowerCase()].join('|');
+      let guest;
+      if (useMongo) {
+        const allGuests = await Guest.find().lean();
+        guest = allGuests.find(g => [(g.first_name||'').trim().toLowerCase(), (g.last_name||'').trim().toLowerCase(), (g.phone||'').trim(), (g.email||'').trim().toLowerCase()].join('|') === key);
+        if (!guest) {
+          const gid = await nextId('guests');
+          guest = await Guest.create({ id: gid, first_name: (b.first_name||'').trim(), last_name: (b.last_name||'').trim(), email: (b.email||'').trim(), phone: (b.phone||'').trim(), nationality: 'Indian' });
+          guest = guest.toObject();
+        }
+      } else {
+        guest = store.guests.find(g => [(g.first_name||'').trim().toLowerCase(), (g.last_name||'').trim().toLowerCase(), (g.phone||'').trim(), (g.email||'').trim().toLowerCase()].join('|') === key);
+        if (!guest) {
+          guest = { id: _nextId(), first_name: (b.first_name||'').trim(), last_name: (b.last_name||'').trim(), email: (b.email||'').trim(), phone: (b.phone||'').trim(), id_proof_type: null, id_proof_number: null, id_proof_encrypted: null, address: '', date_of_birth: null, nationality: 'Indian', total_stays: 0, total_spent: 0, lifetime_value: 0, preferences: '', notes: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+          store.guests.push(guest);
+        }
+      }
+      guestId = guest.id;
+    }
+    const nights = Math.max(1, Math.ceil((new Date(b.check_out) - new Date(b.check_in)) / 86400000));
+    const subtotal = (b.nightly_rate || 0) * nights;
+    const gross = (b.gross_amount || subtotal + (b.cleaning_fee||0) + (b.service_fee||0) + (b.taxes||0));
+    const commPct = b.channel === 'airbnb' ? 3 : b.channel === 'booking.com' ? 15 : 0;
+    const commAmt = Math.round(gross * commPct / 100);
+    const bookingData = { property_id: parseInt(b.property_id), guest_id: guestId, channel: b.channel || 'direct', channel_booking_id: b.channel_booking_id, check_in: b.check_in, check_out: b.check_out, adults: b.adults || 1, children: b.children || 0, infants: b.infants || 0, nightly_rate: b.nightly_rate || 0, subtotal, cleaning_fee: b.cleaning_fee || 0, service_fee: b.service_fee || 0, taxes: b.taxes || 0, gross_amount: gross, commission_percent: commPct, commission_amount: commAmt, net_amount: gross - commAmt, currency: 'INR', payment_status: b.payment_status || 'pending', payment_method: b.payment_method, paid_amount: b.paid_amount || 0, pending_amount: gross - (b.paid_amount || 0), booking_status: 'confirmed', guest_message: b.guest_message || '', special_requests: b.special_requests || '', check_in_time: b.check_in_time || '2:00 PM', check_out_time: b.check_out_time || '11:00 AM', confirmed_at: new Date().toISOString() };
+
+    let booking;
+    if (useMongo) {
+      const bid = await nextId('bookings');
+      booking = await Booking.create({ id: bid, ...bookingData });
+      booking = booking.toObject();
+      await Guest.findOneAndUpdate({ id: guestId }, { $inc: { total_stays: 1, total_spent: booking.net_amount, lifetime_value: booking.net_amount } });
+    } else {
+      booking = { id: _nextId(), ...bookingData, actual_check_in: null, actual_check_out: null, cancelled_at: null, cancellation_reason: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+      store.bookings.push(booking);
+      const g = store.guests.find(gs => gs.id === booking.guest_id);
+      if (g) { g.total_stays++; g.total_spent += booking.net_amount; g.lifetime_value += booking.net_amount; }
+    }
+    res.status(201).json(booking);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.patch('/api/bookings/:id/status', async (req, res) => {
+  try {
+    const update = { booking_status: req.body.status };
+    if (req.body.status === 'checked-in') update.actual_check_in = new Date().toISOString();
+    if (req.body.status === 'checked-out') update.actual_check_out = new Date().toISOString();
+    if (req.body.status === 'cancelled') { update.cancelled_at = new Date().toISOString(); update.cancellation_reason = req.body.cancellation_reason; }
+    if (useMongo) {
+      const b = await Booking.findOneAndUpdate({ id: parseInt(req.params.id) }, { $set: update }, { new: true }).lean();
+      if (!b) return res.status(404).json({ error: 'Not found' });
+      return res.json(b);
+    }
+    const b = store.bookings.find(bk => bk.id == req.params.id);
+    if (!b) return res.status(404).json({ error: 'Not found' });
+    Object.assign(b, update, { updated_at: new Date().toISOString() });
+    res.json(b);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.put('/api/bookings/:id', async (req, res) => {
+  try {
+    if (useMongo) {
+      const b = await Booking.findOneAndUpdate({ id: parseInt(req.params.id) }, { $set: req.body }, { new: true }).lean();
+      if (!b) return res.status(404).json({ error: 'Not found' });
+      return res.json(b);
+    }
+    const b = store.bookings.find(bk => bk.id == req.params.id);
+    if (!b) return res.status(404).json({ error: 'Not found' });
+    Object.assign(b, req.body, { updated_at: new Date().toISOString() });
+    res.json(b);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.patch('/api/bookings/:id/payment', async (req, res) => {
+  try {
+    const amount = parseFloat(req.body.amount) || 0;
+    if (useMongo) {
+      let b = await Booking.findOne({ id: parseInt(req.params.id) });
+      if (!b) return res.status(404).json({ error: 'Not found' });
+      b.paid_amount = (b.paid_amount || 0) + amount;
+      b.pending_amount = (b.gross_amount || 0) - b.paid_amount;
+      b.payment_status = b.pending_amount <= 0 ? 'paid' : 'partial';
+      if (b.pending_amount < 0) b.pending_amount = 0;
+      await b.save();
+      return res.json(b.toObject());
+    }
+    const b = store.bookings.find(bk => bk.id == req.params.id);
+    if (!b) return res.status(404).json({ error: 'Not found' });
+    b.paid_amount = (b.paid_amount || 0) + amount;
+    b.pending_amount = (b.gross_amount || 0) - b.paid_amount;
+    if (b.pending_amount <= 0) { b.pending_amount = 0; b.payment_status = 'paid'; }
+    else { b.payment_status = 'partial'; }
+    b.updated_at = new Date().toISOString();
+    res.json(b);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.post('/api/bookings/:id/cancel', async (req, res) => {
+  try {
+    if (useMongo) {
+      const b = await Booking.findOneAndUpdate({ id: parseInt(req.params.id) }, { booking_status: 'cancelled', cancelled_at: new Date().toISOString(), cancellation_reason: req.body.cancellation_reason || 'Cancelled' }, { new: true }).lean();
+      if (!b) return res.status(404).json({ error: 'Not found' });
+      return res.json(b);
+    }
+    const b = store.bookings.find(bk => bk.id == req.params.id);
+    if (!b) return res.status(404).json({ error: 'Not found' });
+    b.booking_status = 'cancelled'; b.cancelled_at = new Date().toISOString(); b.cancellation_reason = req.body.cancellation_reason || 'Cancelled';
+    res.json(b);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // --- GUESTS ---
-app.get('/api/guests/search/query', (req, res) => {
-  const q = (req.query.q || '').toLowerCase();
-  if (q.length < 2) return res.json([]);
-  const found = store.guests.filter(g => (g.first_name+' '+g.last_name+' '+g.email+' '+g.phone).toLowerCase().includes(q));
-  res.json(found.slice(0, 10));
+app.get('/api/guests/search/query', async (req, res) => {
+  try {
+    const q = (req.query.q || '').toLowerCase();
+    if (q.length < 2) return res.json([]);
+    if (useMongo) {
+      const regex = new RegExp(q, 'i');
+      return res.json(await Guest.find({ $or: [{ first_name: regex }, { last_name: regex }, { email: regex }, { phone: regex }] }).limit(10).lean());
+    }
+    const found = store.guests.filter(g => (g.first_name+' '+g.last_name+' '+g.email+' '+g.phone).toLowerCase().includes(q));
+    res.json(found.slice(0, 10));
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.get('/api/guests/vip/list', (req, res) => {
-  res.json(store.guests.filter(g => g.total_stays >= 3 || g.lifetime_value >= 50000));
+app.get('/api/guests/vip/list', async (req, res) => {
+  try {
+    if (useMongo) return res.json(await Guest.find({ $or: [{ total_stays: { $gte: 3 } }, { lifetime_value: { $gte: 50000 } }] }).lean());
+    res.json(store.guests.filter(g => g.total_stays >= 3 || g.lifetime_value >= 50000));
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.get('/api/guests/stats/summary', (req, res) => {
-  const gs = store.guests;
-  res.json({ total_guests: gs.length, total_stays: gs.reduce((s,g) => s+g.total_stays,0), total_revenue: gs.reduce((s,g) => s+g.lifetime_value,0), avg_lifetime_value: gs.length ? Math.round(gs.reduce((s,g) => s+g.lifetime_value,0)/gs.length) : 0, repeat_guests: gs.filter(g => g.total_stays>1).length });
+app.get('/api/guests/stats/summary', async (req, res) => {
+  try {
+    const gs = useMongo ? await Guest.find().lean() : store.guests;
+    res.json({ total_guests: gs.length, total_stays: gs.reduce((s,g) => s+(g.total_stays||0),0), total_revenue: gs.reduce((s,g) => s+(g.lifetime_value||0),0), avg_lifetime_value: gs.length ? Math.round(gs.reduce((s,g) => s+(g.lifetime_value||0),0)/gs.length) : 0, repeat_guests: gs.filter(g => (g.total_stays||0)>1).length });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.get('/api/guests/:id', (req, res) => {
-  const g = store.guests.find(gs => gs.id == req.params.id);
-  if (!g) return res.status(404).json({ error: 'Not found' });
-  const bookings = store.bookings.filter(b => b.guest_id === g.id).map(b => { const p = store.properties.find(pr => pr.id === b.property_id) || {}; return { ...b, property_name: p.name }; });
-  res.json({ ...g, bookings, messages: [] });
+app.get('/api/guests/:id', async (req, res) => {
+  try {
+    let g, guestBookings;
+    if (useMongo) {
+      g = await Guest.findOne({ id: parseInt(req.params.id) }).lean();
+      if (!g) return res.status(404).json({ error: 'Not found' });
+      const bks = await Booking.find({ guest_id: g.id }).lean();
+      const props = await Property.find().lean();
+      guestBookings = bks.map(b => { const p = props.find(pr => pr.id === b.property_id) || {}; return { ...b, property_name: p.name }; });
+    } else {
+      g = store.guests.find(gs => gs.id == req.params.id);
+      if (!g) return res.status(404).json({ error: 'Not found' });
+      guestBookings = store.bookings.filter(b => b.guest_id === g.id).map(b => { const p = store.properties.find(pr => pr.id === b.property_id) || {}; return { ...b, property_name: p.name }; });
+    }
+    res.json({ ...g, bookings: guestBookings, messages: [] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.get('/api/guests', (req, res) => {
-  let gs = [...store.guests];
-  if (req.query.search) { const s = req.query.search.toLowerCase(); gs = gs.filter(g => (g.first_name+' '+g.last_name+' '+g.email+' '+g.phone).toLowerCase().includes(s)); }
-  const page = parseInt(req.query.page) || 1; const limit = parseInt(req.query.limit) || 20;
-  res.json({ guests: gs.slice((page-1)*limit, page*limit), total: gs.length, page, pages: Math.ceil(gs.length/limit) });
+app.get('/api/guests', async (req, res) => {
+  try {
+    let gs;
+    if (useMongo) {
+      if (req.query.search) {
+        const regex = new RegExp(req.query.search, 'i');
+        gs = await Guest.find({ $or: [{ first_name: regex }, { last_name: regex }, { email: regex }, { phone: regex }] }).lean();
+      } else { gs = await Guest.find().lean(); }
+    } else {
+      gs = [...store.guests];
+      if (req.query.search) { const s = req.query.search.toLowerCase(); gs = gs.filter(g => (g.first_name+' '+g.last_name+' '+g.email+' '+g.phone).toLowerCase().includes(s)); }
+    }
+    const page = parseInt(req.query.page) || 1; const limit = parseInt(req.query.limit) || 20;
+    res.json({ guests: gs.slice((page-1)*limit, page*limit), total: gs.length, page, pages: Math.ceil(gs.length/limit) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.post('/api/guests', (req, res) => {
-  const b = req.body;
-  const existing = store.guests.find(g => g.phone === b.phone);
-  if (existing) { Object.assign(existing, b, { updated_at: new Date().toISOString() }); return res.json({ ...existing, isNew: false }); }
-  const guest = { id: _nextId(), first_name: b.first_name, last_name: b.last_name, email: b.email, phone: b.phone, id_proof_type: b.id_proof_type, id_proof_number: b.id_proof_number, id_proof_encrypted: null, address: b.address, date_of_birth: b.date_of_birth, nationality: b.nationality, total_stays: 0, total_spent: 0, lifetime_value: 0, preferences: b.preferences || '', notes: b.notes || '', created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
-  store.guests.push(guest);
-  res.status(201).json({ ...guest, isNew: true });
+app.post('/api/guests', async (req, res) => {
+  try {
+    const b = req.body;
+    if (useMongo) {
+      if (b.phone) {
+        const existing = await Guest.findOne({ phone: b.phone });
+        if (existing) { Object.assign(existing, b); await existing.save(); return res.json({ ...existing.toObject(), isNew: false }); }
+      }
+      const gid = await nextId('guests');
+      const guest = await Guest.create({ id: gid, ...b });
+      return res.status(201).json({ ...guest.toObject(), isNew: true });
+    }
+    const existing = store.guests.find(g => g.phone === b.phone);
+    if (existing) { Object.assign(existing, b, { updated_at: new Date().toISOString() }); return res.json({ ...existing, isNew: false }); }
+    const guest = { id: _nextId(), first_name: b.first_name, last_name: b.last_name, email: b.email, phone: b.phone, id_proof_type: b.id_proof_type, id_proof_number: b.id_proof_number, id_proof_encrypted: null, address: b.address, date_of_birth: b.date_of_birth, nationality: b.nationality, total_stays: 0, total_spent: 0, lifetime_value: 0, preferences: b.preferences || '', notes: b.notes || '', created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+    store.guests.push(guest);
+    res.status(201).json({ ...guest, isNew: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.put('/api/guests/:id', (req, res) => {
-  const g = store.guests.find(gs => gs.id == req.params.id);
-  if (!g) return res.status(404).json({ error: 'Not found' });
-  Object.assign(g, req.body, { updated_at: new Date().toISOString() });
-  res.json(g);
+app.put('/api/guests/:id', async (req, res) => {
+  try {
+    if (useMongo) {
+      const g = await Guest.findOneAndUpdate({ id: parseInt(req.params.id) }, { $set: req.body }, { new: true }).lean();
+      if (!g) return res.status(404).json({ error: 'Not found' });
+      return res.json(g);
+    }
+    const g = store.guests.find(gs => gs.id == req.params.id);
+    if (!g) return res.status(404).json({ error: 'Not found' });
+    Object.assign(g, req.body, { updated_at: new Date().toISOString() });
+    res.json(g);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.delete('/api/guests/:id', (req, res) => {
-  const idx = store.guests.findIndex(g => g.id == req.params.id);
-  if (idx >= 0) store.guests.splice(idx, 1);
-  res.json({ message: 'Deleted' });
+app.delete('/api/guests/:id', async (req, res) => {
+  try {
+    if (useMongo) { await Guest.findOneAndDelete({ id: parseInt(req.params.id) }); return res.json({ message: 'Deleted' }); }
+    const idx = store.guests.findIndex(g => g.id == req.params.id);
+    if (idx >= 0) store.guests.splice(idx, 1);
+    res.json({ message: 'Deleted' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // --- EXPENSES ---
-app.get('/api/expenses/summary', (req, res) => {
-  const byCategory = {}; const byProperty = {};
-  store.expenses.forEach(e => {
-    if (!byCategory[e.category]) byCategory[e.category] = { category: e.category, total: 0, count: 0 };
-    byCategory[e.category].total += e.amount; byCategory[e.category].count++;
-    const pn = (store.properties.find(p => p.id === e.property_id) || { name: 'General' }).name;
-    if (!byProperty[e.property_id]) byProperty[e.property_id] = { property_id: e.property_id, property_name: pn, total: 0 };
-    byProperty[e.property_id].total += e.amount;
-  });
-  res.json({ byCategory: Object.values(byCategory), total: store.expenses.reduce((s,e) => s+e.amount, 0), byProperty: Object.values(byProperty) });
+app.get('/api/expenses/summary', async (req, res) => {
+  try {
+    const exps = useMongo ? await Expense.find().lean() : store.expenses;
+    const props = useMongo ? await Property.find().lean() : store.properties;
+    const byCategory = {}; const byProperty = {};
+    exps.forEach(e => {
+      if (!byCategory[e.category]) byCategory[e.category] = { category: e.category, total: 0, count: 0 };
+      byCategory[e.category].total += e.amount; byCategory[e.category].count++;
+      const pn = (props.find(p => p.id === e.property_id) || { name: 'General' }).name;
+      if (!byProperty[e.property_id]) byProperty[e.property_id] = { property_id: e.property_id, property_name: pn, total: 0 };
+      byProperty[e.property_id].total += e.amount;
+    });
+    res.json({ byCategory: Object.values(byCategory), total: exps.reduce((s,e) => s+e.amount, 0), byProperty: Object.values(byProperty) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 app.get('/api/expenses/categories', (req, res) => {
   res.json(['laundry','electricity','water','staff_salary','cleaning','maintenance','internet','supplies','groceries','travel','marketing','other']);
 });
-app.get('/api/expenses', (req, res) => {
-  let exps = [...store.expenses];
-  if (req.query.property_id) exps = exps.filter(e => e.property_id == req.query.property_id);
-  if (req.query.category) exps = exps.filter(e => e.category === req.query.category);
-  const enriched = exps.map(e => ({ ...e, property_name: e.property_id === 0 ? 'Common - Stay Nestura' : (store.properties.find(p => p.id === e.property_id) || {}).name }));
-  const page = parseInt(req.query.page) || 1; const limit = parseInt(req.query.limit) || 50;
-  res.json({ expenses: enriched.slice((page-1)*limit, page*limit), total: enriched.length, page, pages: Math.ceil(enriched.length/limit) });
+app.get('/api/expenses', async (req, res) => {
+  try {
+    let exps;
+    if (useMongo) {
+      const filter = {};
+      if (req.query.property_id) filter.property_id = parseInt(req.query.property_id);
+      if (req.query.category) filter.category = req.query.category;
+      exps = await Expense.find(filter).lean();
+    } else {
+      exps = [...store.expenses];
+      if (req.query.property_id) exps = exps.filter(e => e.property_id == req.query.property_id);
+      if (req.query.category) exps = exps.filter(e => e.category === req.query.category);
+    }
+    const props = useMongo ? await Property.find().lean() : store.properties;
+    const enriched = exps.map(e => ({ ...e, property_name: e.property_id === 0 ? 'Common - Stay Nestura' : (props.find(p => p.id === e.property_id) || {}).name }));
+    const page = parseInt(req.query.page) || 1; const limit = parseInt(req.query.limit) || 50;
+    res.json({ expenses: enriched.slice((page-1)*limit, page*limit), total: enriched.length, page, pages: Math.ceil(enriched.length/limit) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.post('/api/expenses', (req, res) => {
-  const b = req.body;
-  const exp = { id: _nextId(), property_id: parseInt(b.property_id), category: b.category, subcategory: b.subcategory, description: b.description, amount: parseFloat(b.amount) || 0, payment_method: b.payment_method || 'cash', vendor_name: b.vendor_name, receipt_number: b.receipt_number, expense_date: b.expense_date || new Date().toISOString().split('T')[0], is_recurring: b.is_recurring || false, recurring_frequency: b.recurring_frequency, created_at: new Date().toISOString(), created_by: 'demo-001' };
-  store.expenses.push(exp);
-  res.status(201).json(exp);
+app.post('/api/expenses', async (req, res) => {
+  try {
+    const b = req.body;
+    const expData = { property_id: parseInt(b.property_id), category: b.category, subcategory: b.subcategory, description: b.description, amount: parseFloat(b.amount) || 0, payment_method: b.payment_method || 'cash', vendor_name: b.vendor_name, receipt_number: b.receipt_number, expense_date: b.expense_date || new Date().toISOString().split('T')[0], is_recurring: b.is_recurring || false, recurring_frequency: b.recurring_frequency, created_by: 'demo-001' };
+    if (useMongo) {
+      const eid = await nextId('expenses');
+      const exp = await Expense.create({ id: eid, ...expData });
+      return res.status(201).json(exp.toObject());
+    }
+    const exp = { id: _nextId(), ...expData, created_at: new Date().toISOString() };
+    store.expenses.push(exp);
+    res.status(201).json(exp);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.post('/api/expenses/bulk', (req, res) => {
-  const created = (req.body.expenses || []).map(b => { const e = { id: _nextId(), ...b, created_at: new Date().toISOString() }; store.expenses.push(e); return e; });
-  res.json({ created: created.length, expenses: created });
+app.post('/api/expenses/bulk', async (req, res) => {
+  try {
+    const items = req.body.expenses || [];
+    if (useMongo) {
+      const docs = [];
+      for (const b of items) { const eid = await nextId('expenses'); docs.push({ id: eid, ...b }); }
+      const created = await Expense.insertMany(docs);
+      return res.json({ created: created.length, expenses: created });
+    }
+    const created = items.map(b => { const e = { id: _nextId(), ...b, created_at: new Date().toISOString() }; store.expenses.push(e); return e; });
+    res.json({ created: created.length, expenses: created });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.put('/api/expenses/:id', (req, res) => {
-  const e = store.expenses.find(ex => ex.id == req.params.id);
-  if (!e) return res.status(404).json({ error: 'Not found' });
-  Object.assign(e, req.body); res.json(e);
+app.put('/api/expenses/:id', async (req, res) => {
+  try {
+    if (useMongo) {
+      const e = await Expense.findOneAndUpdate({ id: parseInt(req.params.id) }, { $set: req.body }, { new: true }).lean();
+      if (!e) return res.status(404).json({ error: 'Not found' });
+      return res.json(e);
+    }
+    const e = store.expenses.find(ex => ex.id == req.params.id);
+    if (!e) return res.status(404).json({ error: 'Not found' });
+    Object.assign(e, req.body); res.json(e);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.delete('/api/expenses/:id', (req, res) => {
-  const idx = store.expenses.findIndex(e => e.id == req.params.id);
-  if (idx >= 0) store.expenses.splice(idx, 1);
-  res.json({ message: 'Deleted' });
+app.delete('/api/expenses/:id', async (req, res) => {
+  try {
+    if (useMongo) { await Expense.findOneAndDelete({ id: parseInt(req.params.id) }); return res.json({ message: 'Deleted' }); }
+    const idx = store.expenses.findIndex(e => e.id == req.params.id);
+    if (idx >= 0) store.expenses.splice(idx, 1);
+    res.json({ message: 'Deleted' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // --- REPORTS ---
-app.get('/api/reports/dashboard', (req, res) => {
-  const today = new Date().toISOString().split('T')[0];
-  const bks = store.bookings.filter(b => b.booking_status !== 'cancelled');
-  res.json({
-    today: { today_checkins: bks.filter(b => b.check_in === today).length, today_checkouts: bks.filter(b => b.check_out === today).length, today_revenue: bks.filter(b => b.check_in === today).reduce((s,b) => s+b.net_amount, 0) },
-    month: { total_bookings: bks.length, gross_revenue: bks.reduce((s,b) => s+b.gross_amount, 0), net_revenue: bks.reduce((s,b) => s+b.net_amount, 0), commission: bks.reduce((s,b) => s+b.commission_amount, 0) },
-    occupancy: store.properties.filter(p => p.is_active).map(p => { const pb = bks.filter(b => b.property_id === p.id); return { name: p.name, booked_nights: pb.length, available_nights: p.total_rooms * 30, occupancy: Math.round(pb.length / Math.max(1, p.total_rooms * 30) * 100) }; }),
-    upcoming: bks.filter(b => b.check_in >= today).sort((a,b) => a.check_in.localeCompare(b.check_in)).slice(0, 5).map(b => { const p = store.properties.find(pr => pr.id === b.property_id) || {}; const g = store.guests.find(gs => gs.id === b.guest_id) || {}; return { id: b.id, check_in: b.check_in, check_out: b.check_out, property_name: p.name, first_name: g.first_name, last_name: g.last_name }; })
-  });
+app.get('/api/reports/dashboard', async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const allBks = useMongo ? await Booking.find().lean() : store.bookings;
+    const bks = allBks.filter(b => b.booking_status !== 'cancelled');
+    const props = useMongo ? await Property.find({ is_active: true }).lean() : store.properties.filter(p => p.is_active);
+    const guests = useMongo ? await Guest.find().lean() : store.guests;
+    res.json({
+      today: { today_checkins: bks.filter(b => b.check_in === today).length, today_checkouts: bks.filter(b => b.check_out === today).length, today_revenue: bks.filter(b => b.check_in === today).reduce((s,b) => s+b.net_amount, 0) },
+      month: { total_bookings: bks.length, gross_revenue: bks.reduce((s,b) => s+b.gross_amount, 0), net_revenue: bks.reduce((s,b) => s+b.net_amount, 0), commission: bks.reduce((s,b) => s+b.commission_amount, 0) },
+      occupancy: props.map(p => { const pb = bks.filter(b => b.property_id === p.id); return { name: p.name, booked_nights: pb.length, available_nights: p.total_rooms * 30, occupancy: Math.round(pb.length / Math.max(1, p.total_rooms * 30) * 100) }; }),
+      upcoming: bks.filter(b => b.check_in >= today).sort((a,b) => a.check_in.localeCompare(b.check_in)).slice(0, 5).map(b => { const p = props.find(pr => pr.id === b.property_id) || {}; const g = guests.find(gs => gs.id === b.guest_id) || {}; return { id: b.id, check_in: b.check_in, check_out: b.check_out, property_name: p.name, first_name: g.first_name, last_name: g.last_name }; })
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.get('/api/reports/profit-loss', (req, res) => {
-  const year = parseInt(req.query.year) || new Date().getFullYear();
-  const month = parseInt(req.query.month) || new Date().getMonth() + 1;
-  const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
-  const endDate = new Date(year, month, 0).toISOString().split('T')[0];
-  const daysInMonth = new Date(year, month, 0).getDate();
-  const bks = store.bookings.filter(b => b.booking_status !== 'cancelled');
-  const monthExps = store.expenses.filter(e => e.expense_date >= startDate && e.expense_date <= endDate);
-  const commonExps = monthExps.filter(e => e.property_id === 0).reduce((s,e) => s+e.amount, 0);
-  const activeProps = store.properties.filter(p => p.is_active);
-  const commonPerProp = activeProps.length ? Math.round(commonExps / activeProps.length) : 0;
-  const properties = activeProps.map(p => {
-    const pb = bks.filter(b => b.property_id === p.id);
-    const gross = pb.reduce((s,b) => s+b.gross_amount, 0);
-    const comm = pb.reduce((s,b) => s+b.commission_amount, 0);
-    const propExps = monthExps.filter(e => e.property_id === p.id).reduce((s,e) => s+e.amount, 0);
-    const exps = propExps + commonPerProp;
-    return { property_id: p.id, property_name: p.name, occupancy_percent: Math.round(pb.length / Math.max(1, p.total_rooms * daysInMonth) * 100), nights_sold: pb.length, gross_revenue: gross, commission: comm, expenses: exps, net_profit: gross - comm - exps };
-  });
-  const totals = { total_gross: properties.reduce((s,p) => s+p.gross_revenue, 0), total_commission: properties.reduce((s,p) => s+p.commission, 0), total_expenses: properties.reduce((s,p) => s+p.expenses, 0), total_net: properties.reduce((s,p) => s+p.net_profit, 0), total_occupancy: properties.length ? Math.round(properties.reduce((s,p) => s+p.occupancy_percent, 0)/properties.length) : 0 };
-  res.json({ period: { year, month, startDate, endDate }, properties, totals });
+app.get('/api/reports/profit-loss', async (req, res) => {
+  try {
+    const year = parseInt(req.query.year) || new Date().getFullYear();
+    const month = parseInt(req.query.month) || new Date().getMonth() + 1;
+    const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
+    const endDate = new Date(year, month, 0).toISOString().split('T')[0];
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const allBks = useMongo ? await Booking.find().lean() : store.bookings;
+    const bks = allBks.filter(b => b.booking_status !== 'cancelled');
+    const allExps = useMongo ? await Expense.find().lean() : store.expenses;
+    const monthExps = allExps.filter(e => e.expense_date >= startDate && e.expense_date <= endDate);
+    const commonExps = monthExps.filter(e => e.property_id === 0).reduce((s,e) => s+e.amount, 0);
+    const activeProps = useMongo ? await Property.find({ is_active: true }).lean() : store.properties.filter(p => p.is_active);
+    const commonPerProp = activeProps.length ? Math.round(commonExps / activeProps.length) : 0;
+    const properties = activeProps.map(p => {
+      const pb = bks.filter(b => b.property_id === p.id);
+      const gross = pb.reduce((s,b) => s+b.gross_amount, 0);
+      const comm = pb.reduce((s,b) => s+b.commission_amount, 0);
+      const propExps = monthExps.filter(e => e.property_id === p.id).reduce((s,e) => s+e.amount, 0);
+      const exps = propExps + commonPerProp;
+      return { property_id: p.id, property_name: p.name, occupancy_percent: Math.round(pb.length / Math.max(1, p.total_rooms * daysInMonth) * 100), nights_sold: pb.length, gross_revenue: gross, commission: comm, expenses: exps, net_profit: gross - comm - exps };
+    });
+    const totals = { total_gross: properties.reduce((s,p) => s+p.gross_revenue, 0), total_commission: properties.reduce((s,p) => s+p.commission, 0), total_expenses: properties.reduce((s,p) => s+p.expenses, 0), total_net: properties.reduce((s,p) => s+p.net_profit, 0), total_occupancy: properties.length ? Math.round(properties.reduce((s,p) => s+p.occupancy_percent, 0)/properties.length) : 0 };
+    res.json({ period: { year, month, startDate, endDate }, properties, totals });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.get('/api/reports/daily-brief', (req, res) => {
-  const today = new Date().toISOString().split('T')[0];
-  const tomorrow = new Date(Date.now()+86400000).toISOString().split('T')[0];
-  const enrich = b => { const p = store.properties.find(pr => pr.id === b.property_id) || {}; const g = store.guests.find(gs => gs.id === b.guest_id) || {}; return { ...b, property_name: p.name, address: p.address, google_maps_link: p.google_maps_link, first_name: g.first_name, last_name: g.last_name, phone: g.phone, guests: (b.adults||0)+(b.children||0) }; };
-  const bks = store.bookings.filter(b => b.booking_status !== 'cancelled');
-  res.json({ date: today, checkIns: bks.filter(b => b.check_in === today).map(enrich), checkOuts: bks.filter(b => b.check_out === today && b.booking_status === 'checked-in').map(enrich), pendingPayments: bks.filter(b => b.pending_amount > 0).map(enrich), cleaningRequired: [...new Set(bks.filter(b => b.check_out === today || b.check_in === tomorrow).map(b => (store.properties.find(p => p.id === b.property_id)||{}).name))].filter(Boolean).map(n => ({ property_name: n })), maintenanceFlags: [] });
+app.get('/api/reports/daily-brief', async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const tomorrow = new Date(Date.now()+86400000).toISOString().split('T')[0];
+    const allBks = useMongo ? await Booking.find().lean() : store.bookings;
+    const bks = allBks.filter(b => b.booking_status !== 'cancelled');
+    const props = useMongo ? await Property.find().lean() : store.properties;
+    const guests = useMongo ? await Guest.find().lean() : store.guests;
+    const enrich = b => { const p = props.find(pr => pr.id === b.property_id) || {}; const g = guests.find(gs => gs.id === b.guest_id) || {}; return { ...b, property_name: p.name, address: p.address, google_maps_link: p.google_maps_link, first_name: g.first_name, last_name: g.last_name, phone: g.phone, guests: (b.adults||0)+(b.children||0) }; };
+    res.json({ date: today, checkIns: bks.filter(b => b.check_in === today).map(enrich), checkOuts: bks.filter(b => b.check_out === today && b.booking_status === 'checked-in').map(enrich), pendingPayments: bks.filter(b => b.pending_amount > 0).map(enrich), cleaningRequired: [...new Set(bks.filter(b => b.check_out === today || b.check_in === tomorrow).map(b => (props.find(p => p.id === b.property_id)||{}).name))].filter(Boolean).map(n => ({ property_name: n })), maintenanceFlags: [] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 app.post('/api/reports/daily-brief/send', (req, res) => {
   res.json({ success: true, message: 'Daily brief sent successfully', channels: req.body.channels || ['email'], preview: 'Daily brief preview' });
 });
-app.get('/api/reports/revenue', (req, res) => {
-  const bks = store.bookings.filter(b => b.booking_status !== 'cancelled');
-  const byChannel = {}; bks.forEach(b => { if (!byChannel[b.channel]) byChannel[b.channel] = { channel: b.channel, bookings: 0, gross: 0, commission: 0, net: 0 }; byChannel[b.channel].bookings++; byChannel[b.channel].gross += b.gross_amount; byChannel[b.channel].commission += b.commission_amount; byChannel[b.channel].net += b.net_amount; });
-  const byMonth = {}; bks.forEach(b => { const m = b.check_in.substring(0,7); if (!byMonth[m]) byMonth[m] = { month: m, bookings: 0, gross: 0, net: 0 }; byMonth[m].bookings++; byMonth[m].gross += b.gross_amount; byMonth[m].net += b.net_amount; });
-  const byProperty = {}; bks.forEach(b => { const pn = (store.properties.find(p => p.id === b.property_id)||{}).name || 'Unknown'; if (!byProperty[pn]) byProperty[pn] = { property_name: pn, bookings: 0, gross: 0, net: 0 }; byProperty[pn].bookings++; byProperty[pn].gross += b.gross_amount; byProperty[pn].net += b.net_amount; });
-  res.json({ byChannel: Object.values(byChannel), byMonth: Object.values(byMonth), byProperty: Object.values(byProperty) });
+app.get('/api/reports/revenue', async (req, res) => {
+  try {
+    const allBks = useMongo ? await Booking.find().lean() : store.bookings;
+    const bks = allBks.filter(b => b.booking_status !== 'cancelled');
+    const props = useMongo ? await Property.find().lean() : store.properties;
+    const byChannel = {}; bks.forEach(b => { if (!byChannel[b.channel]) byChannel[b.channel] = { channel: b.channel, bookings: 0, gross: 0, commission: 0, net: 0 }; byChannel[b.channel].bookings++; byChannel[b.channel].gross += b.gross_amount; byChannel[b.channel].commission += b.commission_amount; byChannel[b.channel].net += b.net_amount; });
+    const byMonth = {}; bks.forEach(b => { const m = b.check_in.substring(0,7); if (!byMonth[m]) byMonth[m] = { month: m, bookings: 0, gross: 0, net: 0 }; byMonth[m].bookings++; byMonth[m].gross += b.gross_amount; byMonth[m].net += b.net_amount; });
+    const byProperty = {}; bks.forEach(b => { const pn = (props.find(p => p.id === b.property_id)||{}).name || 'Unknown'; if (!byProperty[pn]) byProperty[pn] = { property_name: pn, bookings: 0, gross: 0, net: 0 }; byProperty[pn].bookings++; byProperty[pn].gross += b.gross_amount; byProperty[pn].net += b.net_amount; });
+    res.json({ byChannel: Object.values(byChannel), byMonth: Object.values(byMonth), byProperty: Object.values(byProperty) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // --- REPORT EXTRAS ---
-app.get('/api/reports/guest-analytics', (req, res) => {
-  const gs = store.guests;
-  const newGuests = gs.filter(g => g.total_stays <= 1);
-  const repeatGuests = gs.filter(g => g.total_stays > 1);
-  const topGuests = [...gs].sort((a,b) => b.lifetime_value - a.lifetime_value).slice(0, 10).map(g => ({ id: g.id, name: `${g.first_name} ${g.last_name}`, phone: g.phone, total_stays: g.total_stays, lifetime_value: g.lifetime_value }));
-  res.json({ total_guests: gs.length, new_guests: newGuests.length, repeat_guests: repeatGuests.length, repeat_rate: gs.length ? Math.round(repeatGuests.length / gs.length * 100) : 0, topGuests, avg_lifetime_value: gs.length ? Math.round(gs.reduce((s,g) => s + g.lifetime_value, 0) / gs.length) : 0 });
+app.get('/api/reports/guest-analytics', async (req, res) => {
+  try {
+    const gs = useMongo ? await Guest.find().lean() : store.guests;
+    const newGuests = gs.filter(g => (g.total_stays||0) <= 1);
+    const repeatGuests = gs.filter(g => (g.total_stays||0) > 1);
+    const topGuests = [...gs].sort((a,b) => (b.lifetime_value||0) - (a.lifetime_value||0)).slice(0, 10).map(g => ({ id: g.id, name: `${g.first_name} ${g.last_name}`, phone: g.phone, total_stays: g.total_stays, lifetime_value: g.lifetime_value }));
+    res.json({ total_guests: gs.length, new_guests: newGuests.length, repeat_guests: repeatGuests.length, repeat_rate: gs.length ? Math.round(repeatGuests.length / gs.length * 100) : 0, topGuests, avg_lifetime_value: gs.length ? Math.round(gs.reduce((s,g) => s + (g.lifetime_value||0), 0) / gs.length) : 0 });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.get('/api/reports/payment-summary', (req, res) => {
-  const bks = store.bookings.filter(b => b.booking_status !== 'cancelled');
-  const paid = bks.filter(b => b.payment_status === 'paid');
-  const pending = bks.filter(b => b.payment_status === 'pending');
-  const partial = bks.filter(b => b.payment_status === 'partial');
-  res.json({
-    paid: { count: paid.length, total: paid.reduce((s,b) => s + b.gross_amount, 0) },
-    pending: { count: pending.length, total: pending.reduce((s,b) => s + b.gross_amount, 0) },
-    partial: { count: partial.length, total: partial.reduce((s,b) => s + b.gross_amount, 0), collected: partial.reduce((s,b) => s + b.paid_amount, 0), remaining: partial.reduce((s,b) => s + b.pending_amount, 0) },
-    total_collected: bks.reduce((s,b) => s + b.paid_amount, 0),
-    total_pending: bks.reduce((s,b) => s + b.pending_amount, 0)
-  });
+app.get('/api/reports/payment-summary', async (req, res) => {
+  try {
+    const allBks = useMongo ? await Booking.find().lean() : store.bookings;
+    const bks = allBks.filter(b => b.booking_status !== 'cancelled');
+    const paid = bks.filter(b => b.payment_status === 'paid');
+    const pending = bks.filter(b => b.payment_status === 'pending');
+    const partial = bks.filter(b => b.payment_status === 'partial');
+    res.json({
+      paid: { count: paid.length, total: paid.reduce((s,b) => s + b.gross_amount, 0) },
+      pending: { count: pending.length, total: pending.reduce((s,b) => s + b.gross_amount, 0) },
+      partial: { count: partial.length, total: partial.reduce((s,b) => s + b.gross_amount, 0), collected: partial.reduce((s,b) => s + b.paid_amount, 0), remaining: partial.reduce((s,b) => s + b.pending_amount, 0) },
+      total_collected: bks.reduce((s,b) => s + b.paid_amount, 0),
+      total_pending: bks.reduce((s,b) => s + b.pending_amount, 0)
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.get('/api/reports/adr', (req, res) => {
-  const bks = store.bookings.filter(b => b.booking_status !== 'cancelled');
-  const props = store.properties.filter(p => p.is_active).map(p => {
-    const pb = bks.filter(b => b.property_id === p.id);
-    const totalRevenue = pb.reduce((s,b) => s + b.net_amount, 0);
-    const totalNights = pb.reduce((s,b) => s + Math.max(1, Math.ceil((new Date(b.check_out) - new Date(b.check_in)) / 86400000)), 0);
-    return { property_id: p.id, property_name: p.name, total_revenue: totalRevenue, nights_sold: totalNights, adr: totalNights > 0 ? Math.round(totalRevenue / totalNights) : 0, base_price: p.base_price };
-  });
-  const totalRev = props.reduce((s,p) => s + p.total_revenue, 0);
-  const totalNights = props.reduce((s,p) => s + p.nights_sold, 0);
-  res.json({ properties: props, overall_adr: totalNights > 0 ? Math.round(totalRev / totalNights) : 0 });
+app.get('/api/reports/adr', async (req, res) => {
+  try {
+    const allBks = useMongo ? await Booking.find().lean() : store.bookings;
+    const bks = allBks.filter(b => b.booking_status !== 'cancelled');
+    const activeProps = useMongo ? await Property.find({ is_active: true }).lean() : store.properties.filter(p => p.is_active);
+    const props = activeProps.map(p => {
+      const pb = bks.filter(b => b.property_id === p.id);
+      const totalRevenue = pb.reduce((s,b) => s + b.net_amount, 0);
+      const totalNights = pb.reduce((s,b) => s + Math.max(1, Math.ceil((new Date(b.check_out) - new Date(b.check_in)) / 86400000)), 0);
+      return { property_id: p.id, property_name: p.name, total_revenue: totalRevenue, nights_sold: totalNights, adr: totalNights > 0 ? Math.round(totalRevenue / totalNights) : 0, base_price: p.base_price };
+    });
+    const totalRev = props.reduce((s,p) => s + p.total_revenue, 0);
+    const totalNights = props.reduce((s,p) => s + p.nights_sold, 0);
+    res.json({ properties: props, overall_adr: totalNights > 0 ? Math.round(totalRev / totalNights) : 0 });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // --- ICAL LINKS ---
@@ -449,30 +686,52 @@ app.delete('/api/ical-links/:id', (req, res) => {
 });
 
 // --- CHANNEL MANAGER ---
-app.get('/api/channel-manager/accounts', (req, res) => { res.json(store.channel_accounts); });
-app.put('/api/channel-manager/accounts/:id', (req, res) => {
-  const ch = store.channel_accounts.find(c => c.id == req.params.id);
-  if (ch) Object.assign(ch, req.body, { updated_at: new Date().toISOString() });
-  res.json(ch || { error: 'Not found' });
+app.get('/api/channel-manager/accounts', async (req, res) => {
+  try { res.json(useMongo ? await ChannelAccount.find().lean() : store.channel_accounts); }
+  catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.get('/api/channel-manager/availability', (req, res) => {
-  const grouped = {};
-  store.properties.filter(p => p.is_active).forEach(p => { grouped[p.id] = { property_id: p.id, property_name: p.name, total_rooms: p.total_rooms, dates: store.availability.filter(a => a.property_id === p.id).slice(0, 30) }; });
-  res.json(Object.values(grouped));
+app.put('/api/channel-manager/accounts/:id', async (req, res) => {
+  try {
+    if (useMongo) { const ch = await ChannelAccount.findOneAndUpdate({ id: parseInt(req.params.id) }, { $set: req.body }, { new: true }).lean(); return res.json(ch || { error: 'Not found' }); }
+    const ch = store.channel_accounts.find(c => c.id == req.params.id);
+    if (ch) Object.assign(ch, req.body, { updated_at: new Date().toISOString() });
+    res.json(ch || { error: 'Not found' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.post('/api/channel-manager/push/availability', (req, res) => {
-  res.json({ message: 'Availability pushed to channels', results: store.channel_accounts.map(c => ({ channel: c.channel_name, status: 'success', timestamp: new Date().toISOString() })) });
+app.get('/api/channel-manager/availability', async (req, res) => {
+  try {
+    const props = useMongo ? await Property.find({ is_active: true }).lean() : store.properties.filter(p => p.is_active);
+    const avail = useMongo ? await Availability.find().lean() : store.availability;
+    const grouped = {};
+    props.forEach(p => { grouped[p.id] = { property_id: p.id, property_name: p.name, total_rooms: p.total_rooms, dates: avail.filter(a => a.property_id === p.id).slice(0, 30) }; });
+    res.json(Object.values(grouped));
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.post('/api/channel-manager/push/rates', (req, res) => {
-  res.json({ message: 'Rates pushed to channels', results: store.channel_accounts.map(c => ({ channel: c.channel_name, status: 'success' })) });
+app.post('/api/channel-manager/push/availability', async (req, res) => {
+  const channels = useMongo ? await ChannelAccount.find().lean() : store.channel_accounts;
+  res.json({ message: 'Availability pushed to channels', results: channels.map(c => ({ channel: c.channel_name, status: 'success', timestamp: new Date().toISOString() })) });
 });
-app.post('/api/channel-manager/sync/all', (req, res) => {
-  store.sync_logs.push({ id: _nextId(), channel: 'all', sync_type: 'full', status: 'success', records_processed: store.properties.length * 30, errors: null, started_at: new Date().toISOString(), completed_at: new Date().toISOString() });
-  res.json({ message: 'Full sync completed', duration_seconds: 2, properties_synced: store.properties.length, results: store.properties.map(p => ({ property_id: p.id, property_name: p.name, availability_count: 30, status: 'synced' })) });
+app.post('/api/channel-manager/push/rates', async (req, res) => {
+  const channels = useMongo ? await ChannelAccount.find().lean() : store.channel_accounts;
+  res.json({ message: 'Rates pushed to channels', results: channels.map(c => ({ channel: c.channel_name, status: 'success' })) });
 });
-app.get('/api/channel-manager/sync/logs', (req, res) => { res.json(store.sync_logs.slice(-20)); });
-app.get('/api/channel-manager/sync/status', (req, res) => {
-  res.json({ lastSync: new Date().toISOString(), nextSyncIn: 30, channels: store.channel_accounts.map(c => ({ channel_name: c.channel_name, is_active: c.is_active, sync_enabled: c.sync_enabled, last_sync: c.last_sync })), status: 'connected' });
+app.post('/api/channel-manager/sync/all', async (req, res) => {
+  try {
+    const props = useMongo ? await Property.find().lean() : store.properties;
+    if (useMongo) { const sid = await nextId('synclogs'); await SyncLog.create({ id: sid, channel: 'all', sync_type: 'full', status: 'success', records_processed: props.length * 30, started_at: new Date(), completed_at: new Date() }); }
+    else { store.sync_logs.push({ id: _nextId(), channel: 'all', sync_type: 'full', status: 'success', records_processed: props.length * 30, errors: null, started_at: new Date().toISOString(), completed_at: new Date().toISOString() }); }
+    res.json({ message: 'Full sync completed', duration_seconds: 2, properties_synced: props.length, results: props.map(p => ({ property_id: p.id, property_name: p.name, availability_count: 30, status: 'synced' })) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.get('/api/channel-manager/sync/logs', async (req, res) => {
+  try { res.json(useMongo ? await SyncLog.find().sort({ _id: -1 }).limit(20).lean() : store.sync_logs.slice(-20)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.get('/api/channel-manager/sync/status', async (req, res) => {
+  try {
+    const channels = useMongo ? await ChannelAccount.find().lean() : store.channel_accounts;
+    res.json({ lastSync: new Date().toISOString(), nextSyncIn: 30, channels: channels.map(c => ({ channel_name: c.channel_name, is_active: c.is_active, sync_enabled: c.sync_enabled, last_sync: c.last_sync })), status: 'connected' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // --- WEBHOOKS ---
@@ -1252,35 +1511,48 @@ app.use((err, req, res, next) => {
 });
 
 // --- DATA EXPORT/IMPORT ---
-app.get('/api/data/export', (req, res) => {
-  const exportData = {
-    version: '1.0',
-    exported_at: new Date().toISOString(),
-    properties: store.properties,
-    guests: store.guests,
-    bookings: store.bookings,
-    expenses: store.expenses,
-    ical_links: store.ical_links || [],
-    channel_accounts: store.channel_accounts || []
-  };
-  res.setHeader('Content-Disposition', 'attachment; filename=stay-nestura-backup.json');
-  res.json(exportData);
+app.get('/api/data/export', async (req, res) => {
+  try {
+    const exportData = {
+      version: '1.0',
+      exported_at: new Date().toISOString(),
+      properties: useMongo ? await Property.find().lean() : store.properties,
+      guests: useMongo ? await Guest.find().lean() : store.guests,
+      bookings: useMongo ? await Booking.find().lean() : store.bookings,
+      expenses: useMongo ? await Expense.find().lean() : store.expenses,
+      ical_links: store.ical_links || [],
+      channel_accounts: useMongo ? await ChannelAccount.find().lean() : store.channel_accounts || []
+    };
+    res.setHeader('Content-Disposition', 'attachment; filename=stay-nestura-backup.json');
+    res.json(exportData);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.post('/api/data/import', (req, res) => {
+app.post('/api/data/import', async (req, res) => {
   try {
     const data = req.body;
     if (!data || !data.version) return res.status(400).json({ error: 'Invalid backup file' });
     let imported = { properties: 0, guests: 0, bookings: 0, expenses: 0 };
-    if (data.properties && data.properties.length > 0) { store.properties = data.properties; imported.properties = data.properties.length; }
-    if (data.guests) { store.guests = data.guests; imported.guests = data.guests.length; }
-    if (data.bookings) { store.bookings = data.bookings; imported.bookings = data.bookings.length; }
-    if (data.expenses) { store.expenses = data.expenses; imported.expenses = data.expenses.length; }
-    if (data.ical_links) { store.ical_links = data.ical_links; }
-    if (data.channel_accounts) { store.channel_accounts = data.channel_accounts; }
-    // Update ID counter to avoid collisions
-    const allIds = [...store.properties, ...store.guests, ...store.bookings, ...store.expenses].map(i => i.id || 0);
-    _idCounter = Math.max(_idCounter, ...allIds) + 1;
-    persistData();
+    if (useMongo) {
+      if (data.properties && data.properties.length > 0) { await Property.deleteMany({}); await Property.insertMany(data.properties); imported.properties = data.properties.length; }
+      if (data.guests) { await Guest.deleteMany({}); await Guest.insertMany(data.guests); imported.guests = data.guests.length; }
+      if (data.bookings) { await Booking.deleteMany({}); await Booking.insertMany(data.bookings); imported.bookings = data.bookings.length; }
+      if (data.expenses) { await Expense.deleteMany({}); await Expense.insertMany(data.expenses); imported.expenses = data.expenses.length; }
+      // Update counters
+      const maxId = Math.max(...[...(data.properties||[]), ...(data.guests||[]), ...(data.bookings||[]), ...(data.expenses||[])].map(i => i.id || 0));
+      await Counter.findByIdAndUpdate('properties', { seq: maxId + 100 }, { upsert: true });
+      await Counter.findByIdAndUpdate('guests', { seq: maxId + 100 }, { upsert: true });
+      await Counter.findByIdAndUpdate('bookings', { seq: maxId + 100 }, { upsert: true });
+      await Counter.findByIdAndUpdate('expenses', { seq: maxId + 100 }, { upsert: true });
+    } else {
+      if (data.properties && data.properties.length > 0) { store.properties = data.properties; imported.properties = data.properties.length; }
+      if (data.guests) { store.guests = data.guests; imported.guests = data.guests.length; }
+      if (data.bookings) { store.bookings = data.bookings; imported.bookings = data.bookings.length; }
+      if (data.expenses) { store.expenses = data.expenses; imported.expenses = data.expenses.length; }
+      if (data.ical_links) { store.ical_links = data.ical_links; }
+      if (data.channel_accounts) { store.channel_accounts = data.channel_accounts; }
+      const allIds = [...store.properties, ...store.guests, ...store.bookings, ...store.expenses].map(i => i.id || 0);
+      _idCounter = Math.max(_idCounter, ...allIds) + 1;
+    }
     res.json({ success: true, message: 'Data imported successfully', imported });
   } catch (err) {
     res.status(500).json({ error: 'Import failed: ' + err.message });
@@ -1297,25 +1569,31 @@ function toCsv(data, fields) {
   }).join(','));
   return header + '\n' + rows.join('\n');
 }
-app.get('/api/data/export/csv/:type', (req, res) => {
-  const type = req.params.type;
-  let csv = '';
-  if (type === 'properties') {
-    csv = toCsv(store.properties, ['id','name','property_type','address','city','state','pincode','total_rooms','max_guests','base_price','description','is_active']);
-  } else if (type === 'guests') {
-    csv = toCsv(store.guests, ['id','first_name','last_name','email','phone','address','nationality','id_proof_type','id_proof_number','total_stays','total_spent','lifetime_value','created_at']);
-  } else if (type === 'bookings') {
-    const enriched = store.bookings.map(b => { const p = store.properties.find(pr => pr.id === b.property_id) || {}; const g = store.guests.find(gs => gs.id === b.guest_id) || {}; return { ...b, property_name: p.name, guest_name: `${g.first_name||''} ${g.last_name||''}`.trim() }; });
-    csv = toCsv(enriched, ['id','property_name','guest_name','channel','check_in','check_out','adults','children','nightly_rate','gross_amount','paid_amount','pending_amount','payment_status','payment_method','booking_status','created_at']);
-  } else if (type === 'expenses') {
-    const enriched = store.expenses.map(e => ({ ...e, property_name: e.property_id === 0 ? 'Common - Stay Nestura' : (store.properties.find(p => p.id === e.property_id) || {}).name || '' }));
-    csv = toCsv(enriched, ['id','property_name','category','description','amount','payment_method','vendor_name','expense_date','created_at']);
-  } else {
-    return res.status(400).json({ error: 'Invalid type. Use: properties, guests, bookings, expenses' });
-  }
-  res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', `attachment; filename=stay-nestura-${type}-${new Date().toISOString().split('T')[0]}.csv`);
-  res.send(csv);
+app.get('/api/data/export/csv/:type', async (req, res) => {
+  try {
+    const type = req.params.type;
+    let csv = '';
+    const properties = useMongo ? await Property.find().lean() : store.properties;
+    const guests = useMongo ? await Guest.find().lean() : store.guests;
+    if (type === 'properties') {
+      csv = toCsv(properties, ['id','name','property_type','address','city','state','pincode','total_rooms','max_guests','base_price','description','is_active']);
+    } else if (type === 'guests') {
+      csv = toCsv(guests, ['id','first_name','last_name','email','phone','address','nationality','id_proof_type','id_proof_number','total_stays','total_spent','lifetime_value','created_at']);
+    } else if (type === 'bookings') {
+      const bookings = useMongo ? await Booking.find().lean() : store.bookings;
+      const enriched = bookings.map(b => { const p = properties.find(pr => pr.id === b.property_id) || {}; const g = guests.find(gs => gs.id === b.guest_id) || {}; return { ...b, property_name: p.name, guest_name: `${g.first_name||''} ${g.last_name||''}`.trim() }; });
+      csv = toCsv(enriched, ['id','property_name','guest_name','channel','check_in','check_out','adults','children','nightly_rate','gross_amount','paid_amount','pending_amount','payment_status','payment_method','booking_status','created_at']);
+    } else if (type === 'expenses') {
+      const expenses = useMongo ? await Expense.find().lean() : store.expenses;
+      const enriched = expenses.map(e => ({ ...e, property_name: e.property_id === 0 ? 'Common - Stay Nestura' : (properties.find(p => p.id === e.property_id) || {}).name || '' }));
+      csv = toCsv(enriched, ['id','property_name','category','description','amount','payment_method','vendor_name','expense_date','created_at']);
+    } else {
+      return res.status(400).json({ error: 'Invalid type. Use: properties, guests, bookings, expenses' });
+    }
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=stay-nestura-${type}-${new Date().toISOString().split('T')[0]}.csv`);
+    res.send(csv);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // --- SYNC DATA TO DATABASE.JS (for deploy persistence) ---
@@ -1344,9 +1622,24 @@ app.use((req, res) => {
 
 const PORT = process.env.PORT || 5000;
 
-server.listen(PORT, () => {
-  console.log(`Stay Nestura PMS running on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-});
+// Connect to MongoDB then start server
+(async () => {
+  try {
+    useMongo = await connectDB();
+    if (useMongo) {
+      console.log('[MongoDB] Using MongoDB for data persistence');
+    } else {
+      console.log('[Fallback] Using in-memory store');
+    }
+  } catch (err) {
+    console.log('[Fallback] MongoDB connection failed, using in-memory store');
+  }
+
+  server.listen(PORT, () => {
+    console.log(`Stay Nestura PMS running on port ${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`Database: ${useMongo ? 'MongoDB' : 'In-Memory'}`);
+  });
+})();
 
 module.exports = { app, server, io };
