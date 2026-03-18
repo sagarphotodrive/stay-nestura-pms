@@ -1,4 +1,8 @@
 const mongoose = require('mongoose');
+const dns = require('dns');
+
+// Use Google DNS to resolve MongoDB Atlas SRV records (some ISPs block SRV lookups)
+dns.setServers(['8.8.8.8', '8.8.4.4']);
 
 let isConnected = false;
 
