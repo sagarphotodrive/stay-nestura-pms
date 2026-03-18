@@ -923,12 +923,12 @@ a {
   color: var(--success);
 }
 
-.status-badge.checked-in {
+.status-badge.checked_in {
   background: rgba(59, 130, 246, 0.1);
   color: var(--info);
 }
 
-.status-badge.checked-out {
+.status-badge.checked_out {
   background: rgba(107, 114, 128, 0.1);
   color: var(--text-secondary);
 }
@@ -1479,11 +1479,11 @@ a {
 .ical-links-list { display: flex; flex-direction: column; gap: 6px; }
 .ical-link-item {
   display: flex; align-items: center; gap: 10px; padding: 8px 12px;
-  background: rgba(255,255,255,0.03); border-radius: 6px; border: 1px solid rgba(255,255,255,0.06);
+  background: var(--bg-primary); border-radius: 6px; border: 1px solid var(--border);
 }
 .channel-tag {
   font-size: 11px; font-weight: 600; text-transform: uppercase; padding: 2px 8px;
-  border-radius: 4px; background: rgba(255,255,255,0.1); color: #9ca3af;
+  border-radius: 4px; background: rgba(99, 102, 241, 0.1); color: var(--text-secondary);
 }
 .channel-tag.airbnb { background: rgba(255, 90, 95, 0.15); color: #ff5a5f; }
 .channel-tag.booking\.com { background: rgba(0, 53, 128, 0.15); color: #4a9fff; }
@@ -1494,15 +1494,15 @@ a {
 .btn-icon-sm { background: none; border: none; color: #9ca3af; cursor: pointer; padding: 4px; display: flex; }
 .btn-icon-sm:hover { color: #ef4444; }
 .empty-state-sm { font-size: 13px; color: #6b7280; padding: 4px 0; }
-.ical-add-form { border-top: 1px solid rgba(255,255,255,0.06); padding-top: 16px; margin-top: 16px; }
-.ical-add-form h4 { font-size: 14px; margin-bottom: 12px; }
+.ical-add-form { border-top: 1px solid var(--border); padding-top: 16px; margin-top: 16px; }
+.ical-add-form h4 { font-size: 14px; margin-bottom: 12px; color: var(--text-primary); }
 .ical-add-form .form-row { display: flex; gap: 12px; margin-bottom: 12px; }
 .ical-add-form .form-group { flex: 1; display: flex; flex-direction: column; gap: 4px; }
-.ical-add-form .form-group label { font-size: 12px; color: #9ca3af; }
+.ical-add-form .form-group label { font-size: 12px; color: var(--text-secondary); }
 .ical-add-form .form-group input,
 .ical-add-form .form-group select {
-  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 6px; padding: 8px 10px; color: #fff; font-size: 13px;
+  background: var(--bg-primary); border: 1px solid var(--border);
+  border-radius: 6px; padding: 8px 10px; color: var(--text-primary); font-size: 13px;
 }
 
 /* Report Tabs */
@@ -1591,8 +1591,8 @@ a {
 .import-result { margin-top: 16px; padding: 12px 16px; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; color: #065f46; display: flex; align-items: center; gap: 8px; font-size: 14px; }
 
 /* Booking filter bar */
-.filter-bar { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 16px; padding: 12px 16px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; }
+.filter-bar { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 16px; padding: 12px 16px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 10px; }
 .filter-group { display: flex; flex-direction: column; gap: 4px; }
-.filter-group label { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
-.filter-group select, .filter-group input { padding: 6px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.05); color: #e2e8f0; font-size: 13px; min-width: 140px; }
-.filter-group select:focus, .filter-group input:focus { outline: none; border-color: var(--accent, #6366f1); }
+.filter-group label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; }
+.filter-group select, .filter-group input { padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary); font-size: 13px; min-width: 140px; }
+.filter-group select:focus, .filter-group input:focus { outline: none; border-color: var(--primary); }

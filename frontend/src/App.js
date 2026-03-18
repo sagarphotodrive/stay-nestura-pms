@@ -888,8 +888,8 @@ const Bookings = () => {
       <div className="filters">
         <button className={`filter-btn ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>All</button>
         <button className={`filter-btn ${filter === 'confirmed' ? 'active' : ''}`} onClick={() => setFilter('confirmed')}>Confirmed</button>
-        <button className={`filter-btn ${filter === 'checked-in' ? 'active' : ''}`} onClick={() => setFilter('checked-in')}>Checked In</button>
-        <button className={`filter-btn ${filter === 'checked-out' ? 'active' : ''}`} onClick={() => setFilter('checked-out')}>Checked Out</button>
+        <button className={`filter-btn ${filter === 'checked_in' ? 'active' : ''}`} onClick={() => setFilter('checked_in')}>Checked In</button>
+        <button className={`filter-btn ${filter === 'checked_out' ? 'active' : ''}`} onClick={() => setFilter('checked_out')}>Checked Out</button>
         <button className={`filter-btn ${filter === 'cancelled' ? 'active' : ''}`} onClick={() => setFilter('cancelled')}>Cancelled</button>
       </div>
       <div className="filter-bar">
@@ -961,16 +961,16 @@ const Bookings = () => {
                 <button className="btn btn-sm btn-success" onClick={() => recordPayment(booking)}><IndianRupee size={14} /> Record Payment</button>
               )}
               {booking.booking_status === 'confirmed' && (
-                <button className="btn btn-sm" onClick={() => updateStatus(booking.id, 'checked-in')}>Check In</button>
+                <button className="btn btn-sm" onClick={() => updateStatus(booking.id, 'checked_in')}>Check In</button>
               )}
-              {booking.booking_status === 'checked-in' && (
+              {booking.booking_status === 'checked_in' && (
                 <>
-                  <button className="btn btn-sm" onClick={() => updateStatus(booking.id, 'checked-out')}>Check Out</button>
+                  <button className="btn btn-sm" onClick={() => updateStatus(booking.id, 'checked_out')}>Check Out</button>
                   <button className="btn btn-sm btn-secondary" onClick={() => { if(window.confirm('Revert to Confirmed?')) updateStatus(booking.id, 'confirmed'); }}>Undo Check In</button>
                 </>
               )}
-              {booking.booking_status === 'checked-out' && (
-                <button className="btn btn-sm btn-secondary" onClick={() => { if(window.confirm('Revert to Checked In?')) updateStatus(booking.id, 'checked-in'); }}>Undo Check Out</button>
+              {booking.booking_status === 'checked_out' && (
+                <button className="btn btn-sm btn-secondary" onClick={() => { if(window.confirm('Revert to Checked In?')) updateStatus(booking.id, 'checked_in'); }}>Undo Check Out</button>
               )}
               {booking.booking_status === 'cancelled' && (
                 <button className="btn btn-sm btn-success" onClick={() => { if(window.confirm('Rebook this booking?')) updateStatus(booking.id, 'confirmed'); }}>Rebook</button>

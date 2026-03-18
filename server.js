@@ -305,8 +305,8 @@ app.post('/api/bookings', async (req, res) => {
 app.patch('/api/bookings/:id/status', async (req, res) => {
   try {
     const update = { booking_status: req.body.status };
-    if (req.body.status === 'checked-in') update.actual_check_in = new Date().toISOString();
-    if (req.body.status === 'checked-out') update.actual_check_out = new Date().toISOString();
+    if (req.body.status === 'checked_in') update.actual_check_in = new Date().toISOString();
+    if (req.body.status === 'checked_out') update.actual_check_out = new Date().toISOString();
     if (req.body.status === 'cancelled') { update.cancelled_at = new Date().toISOString(); update.cancellation_reason = req.body.cancellation_reason; }
     if (useMongo) {
       const b = await Booking.findOneAndUpdate({ id: parseInt(req.params.id) }, { $set: update }, { new: true }).lean();
