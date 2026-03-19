@@ -1459,6 +1459,7 @@ const Reports = () => {
               <thead>
                 <tr>
                   <th>Property</th>
+                  <th>Nights Sold</th>
                   <th>Occupancy %</th>
                   <th>Gross Revenue</th>
                   <th>Commission</th>
@@ -1470,6 +1471,7 @@ const Reports = () => {
                 {report.properties.map(prop => (
                   <tr key={prop.property_id}>
                     <td>{prop.property_name}</td>
+                    <td>{prop.nights_sold} / {prop.available_nights || '-'}</td>
                     <td>{prop.occupancy_percent}%</td>
                     <td>₹{prop.gross_revenue.toLocaleString()}</td>
                     <td className="text-red">-₹{prop.commission.toLocaleString()}</td>

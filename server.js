@@ -606,11 +606,17 @@ app.get('/api/reports/profit-loss', async (req, res) => {
     const commonPerProp = filteredProps.length ? Math.round(commonExps / filteredProps.length) : 0;
     const properties = filteredProps.map(p => {
       const pb = bks.filter(b => b.property_id === p.id);
+      const nightsSold = pb.reduce((s, b) => {
+        const ci = new Date(Math.max(new Date(b.check_in), new Date(startDate)));
+        const co = new Date(Math.min(new Date(b.check_out), new Date(year, month, 1)));
+        return s + Math.max(0, Math.ceil((co - ci) / 86400000));
+      }, 0);
       const gross = pb.reduce((s,b) => s+b.gross_amount, 0);
       const comm = pb.reduce((s,b) => s+b.commission_amount, 0);
       const propExps = monthExps.filter(e => e.property_id === p.id).reduce((s,e) => s+e.amount, 0);
       const exps = propExps + commonPerProp;
-      return { property_id: p.id, property_name: p.name, occupancy_percent: Math.round(pb.length / Math.max(1, p.total_rooms * daysInMonth) * 100), nights_sold: pb.length, gross_revenue: gross, commission: comm, expenses: exps, net_profit: gross - comm - exps };
+      const availableNights = p.total_rooms * daysInMonth;
+      return { property_id: p.id, property_name: p.name, occupancy_percent: Math.round(nightsSold / Math.max(1, availableNights) * 100), nights_sold: nightsSold, available_nights: availableNights, gross_revenue: gross, commission: comm, expenses: exps, net_profit: gross - comm - exps };
     });
     const totals = { total_gross: properties.reduce((s,p) => s+p.gross_revenue, 0), total_commission: properties.reduce((s,p) => s+p.commission, 0), total_expenses: properties.reduce((s,p) => s+p.expenses, 0), total_net: properties.reduce((s,p) => s+p.net_profit, 0), total_occupancy: properties.length ? Math.round(properties.reduce((s,p) => s+p.occupancy_percent, 0)/properties.length) : 0 };
     res.json({ period: { year, month, startDate, endDate }, properties, totals });
