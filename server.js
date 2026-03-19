@@ -1280,7 +1280,6 @@ app.get('/', (req, res) => {
       <a href="/app/properties?action=new" class="qa-btn">+ Add Property</a>
       <a href="/app/guests?action=new" class="qa-btn">+ Add Guest</a>
       <a href="/app/expenses?action=new" class="qa-btn">+ Record Expense</a>
-      <a href="/api/health" class="qa-btn" target="_blank">API Health Check</a>
     </div>
 
     <!-- Live Stats -->
@@ -1351,7 +1350,7 @@ app.get('/', (req, res) => {
 
     <!-- Footer -->
     <footer class="footer">
-      <p>Stay Nestura PMS &copy; 2024 | <a href="/api/health" target="_blank">API Status</a> | <a href="/app">Open Dashboard</a></p>
+      <p>Stay Nestura PMS &copy; 2024 | <a href="/app">Open Dashboard</a></p>
     </footer>
   </div>
 
@@ -1537,6 +1536,7 @@ app.get('/modules', (req, res) => {
     <a href="/api-docs/channel-manager" class="api-btn">Channel Manager API</a>
     <a href="/api-docs/auth" class="api-btn">Auth API</a>
     <a href="/api-docs/webhooks" class="api-btn">Webhooks API</a>
+    <a href="/api/health" class="api-btn" target="_blank">API Health Check</a>
   </div>
 </div>
 </body></html>`);
