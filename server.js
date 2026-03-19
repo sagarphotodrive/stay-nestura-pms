@@ -216,7 +216,13 @@ app.get('/api/bookings/stats/overview', async (req, res) => {
     let cancelledBks = allBks.filter(b => b.booking_status === 'cancelled' && b.check_in >= startDate && b.check_in <= endDate);
     if (propFilter) { bks = bks.filter(b => b.property_id === propFilter); cancelledBks = cancelledBks.filter(b => b.property_id === propFilter); }
     const props = propFilter ? allProps.filter(p => p.id === propFilter) : allProps;
-    res.json({ summary: { total_bookings: bks.length, cancelled_bookings: cancelledBks.length, total_gross: bks.reduce((s,b) => s+b.gross_amount, 0), total_commission: bks.reduce((s,b) => s+b.commission_amount, 0), total_net: bks.reduce((s,b) => s+b.net_amount, 0), confirmed_bookings: bks.length, unique_guests: new Set(bks.map(b => b.guest_id)).size }, occupancy: props.map(p => ({ property_id: p.id, property_name: p.name, total_nights_booked: bks.filter(b => b.property_id === p.id).length, total_nights_available: p.total_rooms * daysInMonth, occupancy_percent: Math.round(bks.filter(b => b.property_id === p.id).length / Math.max(1, p.total_rooms * daysInMonth) * 100) })) });
+    const monthEnd = new Date(year, month, 1);
+    const calcNights = (propBks) => propBks.reduce((s, b) => {
+      const ci = new Date(Math.max(new Date(b.check_in), new Date(startDate)));
+      const co = new Date(Math.min(new Date(b.check_out), monthEnd));
+      return s + Math.max(0, Math.ceil((co - ci) / 86400000));
+    }, 0);
+    res.json({ summary: { total_bookings: bks.length, cancelled_bookings: cancelledBks.length, total_gross: bks.reduce((s,b) => s+b.gross_amount, 0), total_commission: bks.reduce((s,b) => s+b.commission_amount, 0), total_net: bks.reduce((s,b) => s+b.net_amount, 0), confirmed_bookings: bks.length, unique_guests: new Set(bks.map(b => b.guest_id)).size }, occupancy: props.map(p => { const propBks = bks.filter(b => b.property_id === p.id); const nightsBooked = calcNights(propBks); const available = p.total_rooms * daysInMonth; return { property_id: p.id, property_name: p.name, total_nights_booked: nightsBooked, total_nights_available: available, occupancy_percent: Math.round(nightsBooked / Math.max(1, available) * 100) }; }) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 app.get('/api/bookings/:id', async (req, res) => {
@@ -237,16 +243,24 @@ app.get('/api/bookings', async (req, res) => {
       if (req.query.property_id) filter.property_id = parseInt(req.query.property_id);
       if (req.query.status) filter.booking_status = req.query.status;
       if (req.query.channel) filter.channel = req.query.channel;
+      if (req.query.start_date || req.query.end_date) {
+        filter.$and = [];
+        if (req.query.end_date) filter.$and.push({ check_in: { $lte: req.query.end_date } });
+        if (req.query.start_date) filter.$and.push({ check_out: { $gte: req.query.start_date } });
+        if (filter.$and.length === 0) delete filter.$and;
+      }
       [bks, props, guests] = await Promise.all([Booking.find(filter).lean(), Property.find().lean(), Guest.find().lean()]);
     } else {
       bks = [...store.bookings];
       if (req.query.property_id) bks = bks.filter(b => b.property_id == req.query.property_id);
       if (req.query.status) bks = bks.filter(b => b.booking_status === req.query.status);
       if (req.query.channel) bks = bks.filter(b => b.channel === req.query.channel);
+      if (req.query.start_date) bks = bks.filter(b => b.check_out >= req.query.start_date);
+      if (req.query.end_date) bks = bks.filter(b => b.check_in <= req.query.end_date);
       props = store.properties; guests = store.guests;
     }
     const enriched = bks.map(b => { const p = (props || []).find(pr => pr.id === b.property_id) || {}; const g = (guests || []).find(gs => gs.id === b.guest_id) || {}; return { ...b, property_name: p.name, first_name: g.first_name, last_name: g.last_name, email: g.email, phone: g.phone }; });
-    const page = parseInt(req.query.page) || 1; const limit = parseInt(req.query.limit) || 20;
+    const page = parseInt(req.query.page) || 1; const limit = parseInt(req.query.limit) || (req.query.start_date ? 500 : 20);
     res.json({ bookings: enriched.slice((page-1)*limit, page*limit), total: enriched.length, page, pages: Math.ceil(enriched.length/limit) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
