@@ -1451,23 +1451,65 @@ a:hover {
     gap: 1rem;
   }
   
-  .calendar-header {
-    display: none;
-  }
-  
-  .calendar-body .calendar-row {
+  .calendar-page .page-header {
     flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
   }
-  
-  .property-col {
+  .calendar-nav {
+    gap: 0.4rem;
+    flex-wrap: wrap;
     width: 100%;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-tertiary);
+    justify-content: center;
   }
-  
+  .calendar-nav button {
+    padding: 0.35rem 0.6rem;
+    font-size: 0.75rem;
+  }
+  .calendar-nav span {
+    min-width: auto;
+    font-size: 0.8rem;
+  }
+  .master-calendar {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .calendar-header,
+  .calendar-body .calendar-row {
+    min-width: max-content;
+  }
+  .property-col {
+    width: 100px;
+    min-width: 100px;
+    padding: 0.5rem 0.4rem;
+    font-size: 0.7rem;
+    line-height: 1.2;
+  }
+  .calendar-header .property-col {
+    font-size: 0.65rem;
+  }
+  .day-col {
+    min-width: 36px;
+    padding: 0.3rem 0.15rem;
+    font-size: 0.65rem;
+  }
+  .day-name {
+    font-size: 0.55rem;
+  }
+  .day-num {
+    font-size: 0.7rem;
+  }
   .day-cell {
-    display: none;
+    min-width: 36px;
+    height: 40px;
+  }
+  .booking-badge {
+    width: 22px;
+    height: 22px;
+    font-size: 0.65rem;
+  }
+  .empty-cell-plus {
+    font-size: 0.8rem;
   }
   
   .report-summary {
@@ -1480,9 +1522,26 @@ a:hover {
   .actions-grid {
     grid-template-columns: repeat(2, 1fr);
   }
-  
+
   .action-btn {
     padding: 1rem;
+  }
+  .property-col {
+    width: 80px;
+    min-width: 80px;
+    padding: 0.4rem 0.3rem;
+    font-size: 0.6rem;
+  }
+  .day-col, .day-cell {
+    min-width: 32px;
+  }
+  .day-cell {
+    height: 36px;
+  }
+  .booking-badge {
+    width: 20px;
+    height: 20px;
+    font-size: 0.6rem;
   }
 }
 
