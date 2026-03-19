@@ -460,13 +460,13 @@ const MasterCalendar = () => {
   const [properties, setProperties] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [viewDate, setViewDate] = useState(new Date());
+  const [viewDate, setViewDate] = useState(() => { const d = new Date(); d.setHours(0,0,0,0); return addDays(d, -1); });
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [icalLinks, setIcalLinks] = useState([]);
   const [showIcalSection, setShowIcalSection] = useState(false);
   const [icalForm, setIcalForm] = useState({ property_id: '', channel: 'airbnb', ical_url: '', label: '' });
   const navigate = useNavigate();
-  const days = Array.from({ length: 35 }, (_, i) => addDays(viewDate, i - 7));
+  const days = Array.from({ length: 32 }, (_, i) => addDays(viewDate, i));
 
   useEffect(() => {
     fetchData();
@@ -525,7 +525,8 @@ const MasterCalendar = () => {
         <h1>Master Calendar</h1>
         <div className="calendar-nav">
           <button onClick={() => setViewDate(addDays(viewDate, -7))}>&lt; Previous</button>
-          <span>{format(viewDate, 'MMMM yyyy')}</span>
+          <button className="btn btn-sm btn-secondary" onClick={() => { const d = new Date(); d.setHours(0,0,0,0); setViewDate(addDays(d, -1)); }}>Today</button>
+          <span>{format(days[0], 'd MMM')} – {format(days[days.length - 1], 'd MMM yyyy')}</span>
           <button onClick={() => setViewDate(addDays(viewDate, 7))}>Next &gt;</button>
         </div>
       </div>
