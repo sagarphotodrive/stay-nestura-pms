@@ -1564,6 +1564,11 @@ const Reports = () => {
                   <span className="bar-value">₹{ch.gross.toLocaleString()}</span>
                 </div>
               ))}
+              <div className="bar-chart-row" style={{ borderTop: '2px solid var(--border)', paddingTop: '8px', marginTop: '8px', fontWeight: 700 }}>
+                <span className="bar-label">Total</span>
+                <div className="bar-container"></div>
+                <span className="bar-value">₹{(revenue.byChannel?.reduce((s, c) => s + c.gross, 0) || 0).toLocaleString()}</span>
+              </div>
             </div>
           </div>
           <div className="card" style={{ marginTop: '16px' }}>
@@ -1578,6 +1583,11 @@ const Reports = () => {
                   <span className="bar-value">₹{p.gross.toLocaleString()}</span>
                 </div>
               ))}
+              <div className="bar-chart-row" style={{ borderTop: '2px solid var(--border)', paddingTop: '8px', marginTop: '8px', fontWeight: 700 }}>
+                <span className="bar-label">Total</span>
+                <div className="bar-container"></div>
+                <span className="bar-value">₹{(revenue.byProperty?.reduce((s, p) => s + p.gross, 0) || 0).toLocaleString()}</span>
+              </div>
             </div>
           </div>
           <div className="card" style={{ marginTop: '16px' }}>
@@ -1596,6 +1606,15 @@ const Reports = () => {
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr style={{ fontWeight: 700, borderTop: '2px solid var(--border)' }}>
+                    <td>Total</td>
+                    <td>{revenue.byChannel?.reduce((s, c) => s + c.bookings, 0)}</td>
+                    <td>₹{(revenue.byChannel?.reduce((s, c) => s + c.gross, 0) || 0).toLocaleString()}</td>
+                    <td className="text-red">-₹{(revenue.byChannel?.reduce((s, c) => s + c.commission, 0) || 0).toLocaleString()}</td>
+                    <td className="profit">₹{(revenue.byChannel?.reduce((s, c) => s + c.net, 0) || 0).toLocaleString()}</td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
           </div>
