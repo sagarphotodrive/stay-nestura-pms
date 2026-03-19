@@ -266,13 +266,16 @@ app.get('/api/bookings', async (req, res) => {
 });
 app.get('/api/bookings/check-availability', async (req, res) => {
   try {
-    const { property_id, check_in, check_out } = req.query;
+    const { property_id, check_in, check_out, exclude_booking_id } = req.query;
     if (!property_id || !check_in || !check_out) return res.json({ available: true, conflicts: [] });
+    const excludeId = exclude_booking_id ? parseInt(exclude_booking_id) : null;
     let conflictBookings;
     if (useMongo) {
-      conflictBookings = await Booking.find({ property_id: parseInt(property_id), booking_status: { $ne: 'cancelled' }, check_in: { $lt: check_out }, check_out: { $gt: check_in } }).lean();
+      const filter = { property_id: parseInt(property_id), booking_status: { $ne: 'cancelled' }, check_in: { $lt: check_out }, check_out: { $gt: check_in } };
+      if (excludeId) filter.id = { $ne: excludeId };
+      conflictBookings = await Booking.find(filter).lean();
     } else {
-      conflictBookings = store.bookings.filter(b => b.property_id == property_id && b.booking_status !== 'cancelled' && b.check_in < check_out && b.check_out > check_in);
+      conflictBookings = store.bookings.filter(b => b.property_id == property_id && b.booking_status !== 'cancelled' && b.check_in < check_out && b.check_out > check_in && (!excludeId || b.id !== excludeId));
     }
     const guestsList = useMongo ? await Guest.find().lean() : store.guests;
     const conflicts = conflictBookings.map(b => { const g = guestsList.find(gs => gs.id === b.guest_id) || {}; return { id: b.id, guest_name: `${g.first_name || ''} ${g.last_name || ''}`.trim(), check_in: b.check_in, check_out: b.check_out, channel: b.channel }; });

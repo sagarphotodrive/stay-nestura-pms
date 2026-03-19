@@ -750,15 +750,15 @@ const Bookings = () => {
   const checkAvailability = useCallback(async () => {
     if (bForm.property_id && bForm.check_in && bForm.check_out) {
       try {
-        const res = await api.get('/bookings/check-availability', {
-          params: { property_id: bForm.property_id, check_in: bForm.check_in, check_out: bForm.check_out }
-        });
+        const params = { property_id: bForm.property_id, check_in: bForm.check_in, check_out: bForm.check_out };
+        if (editId) params.exclude_booking_id = editId;
+        const res = await api.get('/bookings/check-availability', { params });
         setAvailabilityStatus(res.data);
       } catch (err) { setAvailabilityStatus(null); }
     } else {
       setAvailabilityStatus(null);
     }
-  }, [bForm.property_id, bForm.check_in, bForm.check_out]);
+  }, [bForm.property_id, bForm.check_in, bForm.check_out, editId]);
 
   useEffect(() => {
     checkAvailability();
@@ -785,8 +785,8 @@ const Bookings = () => {
 
   const handleBooking = async (e) => {
     e.preventDefault();
-    if (!editId && availabilityStatus && !availabilityStatus.available) {
-      alert('Cannot create booking: dates conflict with an existing booking.');
+    if (availabilityStatus && !availabilityStatus.available) {
+      alert('Cannot save booking: dates conflict with an existing booking.\n\n' + availabilityStatus.conflicts.map(c => `• ${c.guest_name} (${c.check_in} to ${c.check_out})`).join('\n'));
       return;
     }
     try {
