@@ -1319,157 +1319,18 @@ app.get('/', (req, res) => {
       </div>
     </div>
 
-    <!-- Management Modules -->
-    <h2 class="section-title">Management Modules</h2>
-    <div class="modules-grid">
-      <a href="/app/properties" class="module-card properties">
+    <!-- Quick Link to Modules -->
+    <div style="margin-bottom:40px">
+      <a href="/modules" class="module-card channels" style="max-width:400px">
         <span class="module-arrow">&#8594;</span>
         <div class="module-header">
-          <div class="module-icon">P</div>
+          <div class="module-icon">&#9776;</div>
           <div class="module-info">
-            <h3>Properties</h3>
-            <p>Manage your homestays, rooms, and pricing</p>
+            <h3>Management Modules</h3>
+            <p>Properties, Bookings, CRM, Reports, API & more</p>
           </div>
         </div>
-        <div class="module-features">
-          <span class="module-tag">Multi-property</span>
-          <span class="module-tag">Room types</span>
-          <span class="module-tag">Rate plans</span>
-          <span class="module-tag">Amenities</span>
-        </div>
       </a>
-
-      <a href="/app/bookings" class="module-card bookings">
-        <span class="module-arrow">&#8594;</span>
-        <div class="module-header">
-          <div class="module-icon">B</div>
-          <div class="module-info">
-            <h3>Bookings</h3>
-            <p>Reservation management with status tracking</p>
-          </div>
-        </div>
-        <div class="module-features">
-          <span class="module-tag">Check-in/out</span>
-          <span class="module-tag">Conflict detection</span>
-          <span class="module-tag">Payments</span>
-          <span class="module-tag">Cancellations</span>
-        </div>
-      </a>
-
-      <a href="/app/calendar" class="module-card calendar">
-        <span class="module-arrow">&#8594;</span>
-        <div class="module-header">
-          <div class="module-icon">C</div>
-          <div class="module-info">
-            <h3>Master Calendar</h3>
-            <p>35-day availability view across all properties</p>
-          </div>
-        </div>
-        <div class="module-features">
-          <span class="module-tag">Availability</span>
-          <span class="module-tag">Block dates</span>
-          <span class="module-tag">Rate updates</span>
-          <span class="module-tag">Visual grid</span>
-        </div>
-      </a>
-
-      <a href="/app/guests" class="module-card guests">
-        <span class="module-arrow">&#8594;</span>
-        <div class="module-header">
-          <div class="module-icon">G</div>
-          <div class="module-info">
-            <h3>Guest CRM</h3>
-            <p>Customer profiles, history, and communication</p>
-          </div>
-        </div>
-        <div class="module-features">
-          <span class="module-tag">Profiles</span>
-          <span class="module-tag">Stay history</span>
-          <span class="module-tag">VIP tracking</span>
-          <span class="module-tag">ID encryption</span>
-        </div>
-      </a>
-
-      <a href="/app/expenses" class="module-card expenses">
-        <span class="module-arrow">&#8594;</span>
-        <div class="module-header">
-          <div class="module-icon">E</div>
-          <div class="module-info">
-            <h3>Expenses</h3>
-            <p>Track property expenses with categorization</p>
-          </div>
-        </div>
-        <div class="module-features">
-          <span class="module-tag">Categories</span>
-          <span class="module-tag">Recurring</span>
-          <span class="module-tag">Per-property</span>
-          <span class="module-tag">Bulk entry</span>
-        </div>
-      </a>
-
-      <a href="/app/reports" class="module-card reports">
-        <span class="module-arrow">&#8594;</span>
-        <div class="module-header">
-          <div class="module-icon">R</div>
-          <div class="module-info">
-            <h3>Reports & Analytics</h3>
-            <p>P&L reports, revenue analytics, daily briefs</p>
-          </div>
-        </div>
-        <div class="module-features">
-          <span class="module-tag">Profit/Loss</span>
-          <span class="module-tag">Revenue</span>
-          <span class="module-tag">Occupancy</span>
-          <span class="module-tag">Daily brief</span>
-        </div>
-      </a>
-
-      <a href="/app/dashboard" class="module-card channels">
-        <span class="module-arrow">&#8594;</span>
-        <div class="module-header">
-          <div class="module-icon">CH</div>
-          <div class="module-info">
-            <h3>Channel Manager</h3>
-            <p>Sync with Airbnb, Booking.com, and OTAs</p>
-          </div>
-        </div>
-        <div class="module-features">
-          <span class="module-tag">Airbnb</span>
-          <span class="module-tag">Booking.com</span>
-          <span class="module-tag">Auto-sync</span>
-          <span class="module-tag">Webhooks</span>
-        </div>
-      </a>
-
-      <a href="/api-docs/properties" class="module-card api">
-        <span class="module-arrow">&#8594;</span>
-        <div class="module-header">
-          <div class="module-icon">API</div>
-          <div class="module-info">
-            <h3>API Documentation</h3>
-            <p>Explore all REST API endpoints</p>
-          </div>
-        </div>
-        <div class="module-features">
-          <span class="module-tag">Properties API</span>
-          <span class="module-tag">Bookings API</span>
-          <span class="module-tag">Guests API</span>
-          <span class="module-tag">50+ endpoints</span>
-        </div>
-      </a>
-    </div>
-
-    <!-- API Quick Links -->
-    <h2 class="section-title">API Documentation</h2>
-    <div class="quick-actions" style="margin-bottom:40px">
-      <a href="/api-docs/properties" class="qa-btn">Properties API</a>
-      <a href="/api-docs/bookings" class="qa-btn">Bookings API</a>
-      <a href="/api-docs/guests" class="qa-btn">Guests API</a>
-      <a href="/api-docs/expenses" class="qa-btn">Expenses API</a>
-      <a href="/api-docs/reports" class="qa-btn">Reports API</a>
-      <a href="/api-docs/channel-manager" class="qa-btn">Channel Manager API</a>
-      <a href="/api-docs/auth" class="qa-btn">Auth API</a>
-      <a href="/api-docs/webhooks" class="qa-btn">Webhooks API</a>
     </div>
 
     <!-- Footer -->
@@ -1585,6 +1446,84 @@ app.get('/', (req, res) => {
 </body>
 </html>
   `);
+});
+
+// Management Modules Page
+app.get('/modules', (req, res) => {
+  res.send(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/><meta name="theme-color" content="#1b2a4a"/><title>Management Modules | Stay Nestura</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --primary:#1b2a4a; --accent:#c9a96e; --bg:#faf8f5; --bg-card:#fff; --border:#e5e7eb; --text:#1b2a4a; --text-muted:#64748b; --radius:14px; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Montserrat',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+  .container { max-width:1000px; margin:0 auto; padding:24px 16px; }
+  .page-header { display:flex; align-items:center; gap:16px; margin-bottom:32px; flex-wrap:wrap; }
+  .page-header h1 { font-family:'Playfair Display',serif; font-size:1.8rem; color:var(--primary); }
+  .back-btn { padding:8px 16px; background:var(--primary); color:#fff; border:none; border-radius:8px; font-size:14px; font-weight:500; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:6px; }
+  .back-btn:hover { background:#243656; }
+  .modules-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:20px; }
+  .module-card { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:24px; text-decoration:none; color:inherit; display:block; position:relative; overflow:hidden; transition:all 0.3s; }
+  .module-card::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; opacity:0; transition:opacity 0.3s; }
+  .module-card:hover { transform:translateY(-3px); box-shadow:0 8px 24px rgba(27,42,74,0.1); border-color:var(--accent); }
+  .module-card:hover::before { opacity:1; }
+  .module-header { display:flex; align-items:center; gap:14px; margin-bottom:14px; }
+  .module-icon { width:44px; height:44px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:20px; color:#fff; font-weight:700; flex-shrink:0; }
+  .module-info h3 { font-family:'Playfair Display',serif; font-size:1.05rem; font-weight:600; margin-bottom:2px; }
+  .module-info p { font-size:13px; color:var(--text-muted); }
+  .module-features { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+  .module-tag { padding:4px 10px; background:rgba(27,42,74,0.05); border-radius:6px; font-size:12px; color:var(--text-muted); }
+  .module-arrow { position:absolute; top:24px; right:24px; color:var(--text-muted); font-size:18px; transition:all 0.3s; }
+  .module-card:hover .module-arrow { color:var(--accent); transform:translateX(4px); }
+  .module-card.properties::before { background:linear-gradient(90deg,var(--accent),#7c3aed); }
+  .module-card.properties .module-icon { background:linear-gradient(135deg,var(--accent),#7c3aed); }
+  .module-card.bookings::before { background:linear-gradient(90deg,#ec4899,#f59e0b); }
+  .module-card.bookings .module-icon { background:linear-gradient(135deg,#ec4899,#f59e0b); }
+  .module-card.calendar::before { background:linear-gradient(90deg,#3b82f6,#06b6d4); }
+  .module-card.calendar .module-icon { background:linear-gradient(135deg,#3b82f6,#06b6d4); }
+  .module-card.guests::before { background:linear-gradient(90deg,#10b981,#06b6d4); }
+  .module-card.guests .module-icon { background:linear-gradient(135deg,#10b981,#06b6d4); }
+  .module-card.expenses::before { background:linear-gradient(90deg,#f59e0b,#ef4444); }
+  .module-card.expenses .module-icon { background:linear-gradient(135deg,#f59e0b,#ef4444); }
+  .module-card.reports::before { background:linear-gradient(90deg,#7c3aed,#ec4899); }
+  .module-card.reports .module-icon { background:linear-gradient(135deg,#7c3aed,#ec4899); }
+  .module-card.channels::before { background:linear-gradient(90deg,#06b6d4,#3b82f6); }
+  .module-card.channels .module-icon { background:linear-gradient(135deg,#06b6d4,#3b82f6); }
+  .module-card.api::before { background:linear-gradient(90deg,#10b981,var(--accent)); }
+  .module-card.api .module-icon { background:linear-gradient(135deg,#10b981,var(--accent)); }
+  .section-title { font-family:'Playfair Display',serif; font-size:1.2rem; font-weight:600; margin:32px 0 16px; color:var(--primary); }
+  .api-links { display:flex; gap:10px; flex-wrap:wrap; }
+  .api-btn { padding:8px 16px; background:var(--bg-card); border:1px solid var(--border); border-radius:8px; font-size:13px; font-weight:500; color:var(--text); text-decoration:none; transition:all 0.2s; }
+  .api-btn:hover { border-color:var(--accent); background:rgba(201,169,110,0.05); }
+  @media(max-width:640px) { .modules-grid { grid-template-columns:1fr; } .page-header h1 { font-size:1.4rem; } }
+</style></head><body>
+<div class="container">
+  <div class="page-header">
+    <a href="/" class="back-btn">&#8592; Home</a>
+    <h1>Management Modules</h1>
+  </div>
+  <div class="modules-grid">
+    <a href="/app/properties" class="module-card properties"><span class="module-arrow">&#8594;</span><div class="module-header"><div class="module-icon">P</div><div class="module-info"><h3>Properties</h3><p>Manage your homestays, rooms, and pricing</p></div></div><div class="module-features"><span class="module-tag">Multi-property</span><span class="module-tag">Room types</span><span class="module-tag">Rate plans</span><span class="module-tag">Amenities</span></div></a>
+    <a href="/app/bookings" class="module-card bookings"><span class="module-arrow">&#8594;</span><div class="module-header"><div class="module-icon">B</div><div class="module-info"><h3>Bookings</h3><p>Reservation management with status tracking</p></div></div><div class="module-features"><span class="module-tag">Check-in/out</span><span class="module-tag">Conflict detection</span><span class="module-tag">Payments</span><span class="module-tag">Cancellations</span></div></a>
+    <a href="/app/calendar" class="module-card calendar"><span class="module-arrow">&#8594;</span><div class="module-header"><div class="module-icon">C</div><div class="module-info"><h3>Master Calendar</h3><p>Availability view across all properties</p></div></div><div class="module-features"><span class="module-tag">Availability</span><span class="module-tag">Block dates</span><span class="module-tag">Rate updates</span><span class="module-tag">Visual grid</span></div></a>
+    <a href="/app/guests" class="module-card guests"><span class="module-arrow">&#8594;</span><div class="module-header"><div class="module-icon">G</div><div class="module-info"><h3>Guest CRM</h3><p>Customer profiles, history, and communication</p></div></div><div class="module-features"><span class="module-tag">Profiles</span><span class="module-tag">Stay history</span><span class="module-tag">VIP tracking</span><span class="module-tag">ID encryption</span></div></a>
+    <a href="/app/expenses" class="module-card expenses"><span class="module-arrow">&#8594;</span><div class="module-header"><div class="module-icon">E</div><div class="module-info"><h3>Expenses</h3><p>Track property expenses with categorization</p></div></div><div class="module-features"><span class="module-tag">Categories</span><span class="module-tag">Recurring</span><span class="module-tag">Per-property</span><span class="module-tag">Bulk entry</span></div></a>
+    <a href="/app/reports" class="module-card reports"><span class="module-arrow">&#8594;</span><div class="module-header"><div class="module-icon">R</div><div class="module-info"><h3>Reports & Analytics</h3><p>P&L reports, revenue analytics, daily briefs</p></div></div><div class="module-features"><span class="module-tag">Profit/Loss</span><span class="module-tag">Revenue</span><span class="module-tag">Occupancy</span><span class="module-tag">Daily brief</span></div></a>
+    <a href="/app/dashboard" class="module-card channels"><span class="module-arrow">&#8594;</span><div class="module-header"><div class="module-icon">CH</div><div class="module-info"><h3>Channel Manager</h3><p>Sync with Airbnb, Booking.com, and OTAs</p></div></div><div class="module-features"><span class="module-tag">Airbnb</span><span class="module-tag">Booking.com</span><span class="module-tag">Auto-sync</span><span class="module-tag">Webhooks</span></div></a>
+    <a href="/api-docs/properties" class="module-card api"><span class="module-arrow">&#8594;</span><div class="module-header"><div class="module-icon">API</div><div class="module-info"><h3>API Documentation</h3><p>Explore all REST API endpoints</p></div></div><div class="module-features"><span class="module-tag">Properties API</span><span class="module-tag">Bookings API</span><span class="module-tag">Guests API</span><span class="module-tag">50+ endpoints</span></div></a>
+  </div>
+  <h2 class="section-title">API Documentation</h2>
+  <div class="api-links">
+    <a href="/api-docs/properties" class="api-btn">Properties API</a>
+    <a href="/api-docs/bookings" class="api-btn">Bookings API</a>
+    <a href="/api-docs/guests" class="api-btn">Guests API</a>
+    <a href="/api-docs/expenses" class="api-btn">Expenses API</a>
+    <a href="/api-docs/reports" class="api-btn">Reports API</a>
+    <a href="/api-docs/channel-manager" class="api-btn">Channel Manager API</a>
+    <a href="/api-docs/auth" class="api-btn">Auth API</a>
+    <a href="/api-docs/webhooks" class="api-btn">Webhooks API</a>
+  </div>
+</div>
+</body></html>`);
 });
 
 // Real-time sync status endpoint
