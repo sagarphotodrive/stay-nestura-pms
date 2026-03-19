@@ -1692,6 +1692,9 @@ a:hover {
 .btn.btn-success { background: var(--success); color: #fff; border: none; }
 .btn.btn-success:hover { background: #059669; }
 .btn.btn-sm.btn-success { padding: 4px 10px; font-size: 12px; }
+.btn.btn-whatsapp { background: #25D366; color: #fff; border: none; font-weight: 600; }
+.btn.btn-whatsapp:hover { background: #1DA851; }
+.btn.btn-sm.btn-whatsapp { padding: 4px 10px; font-size: 12px; }
 
 /* Settings page */
 .settings-page { padding: 0; }

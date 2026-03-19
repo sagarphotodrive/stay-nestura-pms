@@ -404,6 +404,58 @@ const Properties = () => {
 };
 
 // Master Calendar Component
+const generateBookingWhatsAppMsg = (b, prop) => {
+  const ciDate = format(new Date(b.check_in), 'd MMMM');
+  const coDate = format(new Date(b.check_out), 'd MMMM');
+  const total = parseFloat(b.gross_amount || b.net_amount || 0);
+  const advance = parseFloat(b.paid_amount || 0);
+  const balance = total - advance;
+  const guestCount = [];
+  if (b.adults) guestCount.push(`${b.adults} Adult${b.adults > 1 ? 's' : ''}`);
+  if (b.children) guestCount.push(`${b.children} Child${b.children > 1 ? 'ren' : ''}`);
+  const checkInTime = b.check_in_time || '2:00 PM';
+  const checkOutTime = b.check_out_time || '11:00 AM';
+  let paymentLine = `Total ₹${total.toLocaleString('en-IN')}`;
+  if (advance > 0 && balance > 0) {
+    paymentLine += ` | Advance ₹${advance.toLocaleString('en-IN')}\nBalance ₹${balance.toLocaleString('en-IN')} (payable at check-in)`;
+  } else if (advance >= total) {
+    paymentLine += ` | Fully Paid ✓`;
+  } else {
+    paymentLine += ` (payable at check-in)`;
+  }
+  const locationLine = b.google_maps_link || (prop && prop.google_maps_link) || '';
+  const propName = b.property_name || (prop && prop.name) || 'Stay Nestura';
+  let msg = `*Booking Confirmed – ${propName} by Stay Nestura*\n\n`;
+  msg += `Guest: ${b.first_name} ${b.last_name || ''}\n`;
+  msg += `Guests: ${guestCount.join(', ') || '1 Adult'}\n\n`;
+  msg += `Check-in: ${ciDate} | ${checkInTime} onwards\n`;
+  msg += `Check-out: ${coDate} | ${checkOutTime}\n\n`;
+  msg += `Payment:\n${paymentLine}\n`;
+  if (locationLine) msg += `\nLocation:\n${locationLine}\n`;
+  msg += `\n*MANDATORY before check-in*\nPlease complete online check-in:\nhttps://bnbhost.in/staynestura\n`;
+  msg += `\nContact: 9766504266\nEmergency: 8308122281\n`;
+  msg += `\n*House Rules:*\n`;
+  msg += `• Kitchen utensils must be cleaned before check-out.\n  (₹250 charge if maid service required for utensils only. ₹500 for house cleaning if staying less than 3 days. For more than 3 days, every third day room service will be provided.)\n`;
+  msg += `• Please use water & electricity wisely — Turn off taps and shower in time and don't let water just flow away as we receive corporation water supply once in 5 days!! Switch off all appliances and lights when they are not in use.\n`;
+  msg += `• This is a homestay, not a hotel, so kindly take care of it and treat it as your own home. 😊\n`;
+  msg += `\nTeam ${propName} by Stay Nestura`;
+  return msg;
+};
+
+const openWhatsApp = (b, prop) => {
+  const msg = generateBookingWhatsAppMsg(b, prop);
+  const phone = (b.phone || '').replace(/\D/g, '');
+  const fullPhone = phone.startsWith('91') ? phone : `91${phone}`;
+  window.open(`https://wa.me/${fullPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+};
+
+const copyBookingMessage = (b, prop) => {
+  const msg = generateBookingWhatsAppMsg(b, prop);
+  navigator.clipboard.writeText(msg).then(() => alert('Booking message copied to clipboard!')).catch(() => {
+    const ta = document.createElement('textarea'); ta.value = msg; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); alert('Booking message copied!');
+  });
+};
+
 const MasterCalendar = () => {
   const [properties, setProperties] = useState([]);
   const [bookings, setBookings] = useState([]);
@@ -589,7 +641,9 @@ const MasterCalendar = () => {
                   <span className="detail-value">{selectedBooking.special_requests}</span>
                 </div>
               )}
-              <div className="form-actions" style={{ marginTop: '16px' }}>
+              <div className="form-actions" style={{ marginTop: '16px', gap: '8px' }}>
+                <button className="btn btn-whatsapp" onClick={() => openWhatsApp(selectedBooking)}>WhatsApp</button>
+                <button className="btn btn-secondary" onClick={() => copyBookingMessage(selectedBooking)}><Copy size={14} /> Copy</button>
                 <button className="btn btn-primary" onClick={() => { setSelectedBooking(null); navigate('/bookings'); }}>
                   View All Bookings
                 </button>
@@ -975,6 +1029,12 @@ const Bookings = () => {
                 {booking.booking_status}
               </span>
               <button className="btn btn-sm btn-edit" onClick={() => openEdit(booking)}><Edit3 size={14} /> Edit</button>
+              {booking.booking_status !== 'cancelled' && (
+                <>
+                  <button className="btn btn-sm btn-whatsapp" onClick={() => openWhatsApp(booking)} title="Send via WhatsApp">WhatsApp</button>
+                  <button className="btn btn-sm btn-secondary" onClick={() => copyBookingMessage(booking)} title="Copy message"><Copy size={14} /></button>
+                </>
+              )}
               {(booking.pending_amount || 0) > 0 && booking.booking_status !== 'cancelled' && (
                 <button className="btn btn-sm btn-success" onClick={() => recordPayment(booking)}><IndianRupee size={14} /> Record Payment</button>
               )}

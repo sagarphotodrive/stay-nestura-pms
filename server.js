@@ -259,7 +259,7 @@ app.get('/api/bookings', async (req, res) => {
       if (req.query.end_date) bks = bks.filter(b => b.check_in <= req.query.end_date);
       props = store.properties; guests = store.guests;
     }
-    const enriched = bks.map(b => { const p = (props || []).find(pr => pr.id === b.property_id) || {}; const g = (guests || []).find(gs => gs.id === b.guest_id) || {}; return { ...b, property_name: p.name, first_name: g.first_name, last_name: g.last_name, email: g.email, phone: g.phone }; });
+    const enriched = bks.map(b => { const p = (props || []).find(pr => pr.id === b.property_id) || {}; const g = (guests || []).find(gs => gs.id === b.guest_id) || {}; return { ...b, property_name: p.name, address: p.address, google_maps_link: p.google_maps_link, first_name: g.first_name, last_name: g.last_name, email: g.email, phone: g.phone }; });
     const page = parseInt(req.query.page) || 1; const limit = parseInt(req.query.limit) || (req.query.start_date ? 500 : 20);
     res.json({ bookings: enriched.slice((page-1)*limit, page*limit), total: enriched.length, page, pages: Math.ceil(enriched.length/limit) });
   } catch (err) { res.status(500).json({ error: err.message }); }
