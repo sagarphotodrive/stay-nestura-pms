@@ -1052,7 +1052,10 @@ const Bookings = () => {
                 <button className="btn btn-sm btn-secondary" onClick={() => { if(window.confirm('Revert to Checked In?')) updateStatus(booking.id, 'checked_in'); }}>Undo Check Out</button>
               )}
               {booking.booking_status === 'cancelled' && (
-                <button className="btn btn-sm btn-success" onClick={() => { if(window.confirm('Rebook this booking?')) updateStatus(booking.id, 'confirmed'); }}>Rebook</button>
+                <>
+                  <button className="btn btn-sm btn-success" onClick={() => { if(window.confirm('Rebook this booking?')) updateStatus(booking.id, 'confirmed'); }}>Rebook</button>
+                  <button className="btn btn-sm btn-danger" onClick={async () => { if(window.confirm('Permanently delete this cancelled booking? This cannot be undone.')) { try { await api.delete(`/bookings/${booking.id}`); fetchBookings(); } catch(err) { alert('Failed to delete'); } } }}><Trash2 size={14} /> Delete</button>
+                </>
               )}
               {booking.booking_status !== 'cancelled' && (
                 <button className="btn btn-sm btn-danger" onClick={() => { if(window.confirm('Cancel this booking?')) updateStatus(booking.id, 'cancelled'); }}>Cancel</button>

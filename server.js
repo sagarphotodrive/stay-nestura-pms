@@ -381,6 +381,22 @@ app.patch('/api/bookings/:id/payment', async (req, res) => {
     res.json(b);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+app.delete('/api/bookings/:id', async (req, res) => {
+  try {
+    if (useMongo) {
+      const b = await Booking.findOne({ id: parseInt(req.params.id) });
+      if (!b) return res.status(404).json({ error: 'Not found' });
+      if (b.booking_status !== 'cancelled') return res.status(400).json({ error: 'Only cancelled bookings can be deleted' });
+      await Booking.deleteOne({ id: parseInt(req.params.id) });
+      return res.json({ message: 'Booking deleted' });
+    }
+    const idx = store.bookings.findIndex(bk => bk.id == req.params.id);
+    if (idx === -1) return res.status(404).json({ error: 'Not found' });
+    if (store.bookings[idx].booking_status !== 'cancelled') return res.status(400).json({ error: 'Only cancelled bookings can be deleted' });
+    store.bookings.splice(idx, 1);
+    res.json({ message: 'Booking deleted' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 app.post('/api/bookings/:id/cancel', async (req, res) => {
   try {
     if (useMongo) {
