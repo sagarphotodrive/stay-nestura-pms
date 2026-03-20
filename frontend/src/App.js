@@ -433,7 +433,10 @@ const generateBookingWhatsAppMsg = (b, prop) => {
   msg += `Payment:\n${paymentLine}\n`;
   if (locationLine) msg += `\nLocation:\n${locationLine}\n`;
   msg += `\n*MANDATORY before check-in*\nPlease complete online check-in:\nhttps://bnbhost.in/staynestura\n`;
-  msg += `\nContact: 9766504266\nEmergency: 8308122281\n`;
+  const isSolapurGroup = [3, 5, 6].includes(b.property_id);
+  const contactNo = isSolapurGroup ? '9766504266' : '7499075244';
+  const emergencyNo = isSolapurGroup ? '8308122281' : '9766504266';
+  msg += `\nContact: ${contactNo}\nEmergency: ${emergencyNo}\n`;
   msg += `\n*House Rules:*\n`;
   msg += `• Kitchen utensils must be cleaned before check-out.\n  (₹250 charge if maid service required for utensils only. ₹500 for house cleaning if staying less than 3 days. For more than 3 days, every third day room service will be provided.)\n`;
   msg += `• Please use water & electricity wisely — Turn off taps and shower in time and don't let water just flow away as we receive corporation water supply once in 5 days!! Switch off all appliances and lights when they are not in use.\n`;
