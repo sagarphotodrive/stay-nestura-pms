@@ -416,7 +416,7 @@ const generateBookingWhatsAppMsg = (b, prop) => {
   if (b.adults) guestCount.push(`${b.adults} Adult${b.adults > 1 ? 's' : ''}`);
   if (b.children) guestCount.push(`${b.children} Child${b.children > 1 ? 'ren' : ''}`);
   const checkInTime = b.check_in_time || '2:00 PM';
-  const checkOutTime = b.check_out_time || '11:00 AM';
+  const checkOutTime = b.check_out_time || '4:00 PM';
   let paymentLine = `Total ₹${total.toLocaleString('en-IN')}`;
   if (advance > 0 && balance > 0) {
     paymentLine += ` | Advance ₹${advance.toLocaleString('en-IN')}\nBalance ₹${balance.toLocaleString('en-IN')} (payable at check-in)`;
@@ -1512,12 +1512,11 @@ const Reports = () => {
     if (!report) return;
     generateReportPDF('Profit & Loss Report', subTitle, [{
       title: 'Property-wise P&L',
-      head: ['Property', 'Nights Sold', 'Occupancy %', 'Gross Revenue', 'Commission', 'Expenses', 'Net Profit'],
-      body: [...report.properties.map(p => [p.property_name, `${p.nights_sold}/${p.available_nights}`, `${p.occupancy_percent}%`, `₹${p.gross_revenue.toLocaleString()}`, `-₹${p.commission.toLocaleString()}`, `-₹${p.expenses.toLocaleString()}`, `₹${p.net_profit.toLocaleString()}`]),
-        [{ content: 'Total', styles: { fontStyle: 'bold' } }, '', '', `₹${report.totals.total_gross.toLocaleString()}`, `-₹${report.totals.total_commission.toLocaleString()}`, `-₹${report.totals.total_expenses.toLocaleString()}`, `₹${report.totals.total_net.toLocaleString()}`]]
+      head: ['Property', 'Nights Sold', 'Occupancy %', 'Gross Revenue', 'Expenses', 'Net Profit'],
+      body: [...report.properties.map(p => [p.property_name, `${p.nights_sold}/${p.available_nights}`, `${p.occupancy_percent}%`, `₹${p.gross_revenue.toLocaleString()}`, `-₹${p.expenses.toLocaleString()}`, `₹${p.net_profit.toLocaleString()}`]),
+        [{ content: 'Total', styles: { fontStyle: 'bold' } }, '', '', `₹${report.totals.total_gross.toLocaleString()}`, `-₹${report.totals.total_expenses.toLocaleString()}`, `₹${report.totals.total_net.toLocaleString()}`]]
     }], [
       { label: 'Total Revenue', value: `₹${report.totals.total_gross.toLocaleString()}` },
-      { label: 'Commissions', value: `-₹${report.totals.total_commission.toLocaleString()}` },
       { label: 'Expenses', value: `-₹${report.totals.total_expenses.toLocaleString()}` },
       { label: 'Net Profit', value: `₹${report.totals.total_net.toLocaleString()}` }
     ]);
@@ -1526,7 +1525,7 @@ const Reports = () => {
   const downloadRevenuePDF = () => {
     if (!revenue) return;
     const tables = [];
-    if (revenue.byChannel?.length) tables.push({ title: 'Revenue by Channel', head: ['Channel', 'Bookings', 'Gross', 'Commission', 'Net'], body: [...revenue.byChannel.map(c => [c.channel, c.bookings, `₹${c.gross.toLocaleString()}`, `-₹${c.commission.toLocaleString()}`, `₹${c.net.toLocaleString()}`]), [{ content: 'Total', styles: { fontStyle: 'bold' } }, revenue.byChannel.reduce((s,c) => s+c.bookings, 0), `₹${revenue.byChannel.reduce((s,c) => s+c.gross, 0).toLocaleString()}`, `-₹${revenue.byChannel.reduce((s,c) => s+c.commission, 0).toLocaleString()}`, `₹${revenue.byChannel.reduce((s,c) => s+c.net, 0).toLocaleString()}`]] });
+    if (revenue.byChannel?.length) tables.push({ title: 'Revenue by Channel', head: ['Channel', 'Bookings', 'Revenue'], body: [...revenue.byChannel.map(c => [c.channel, c.bookings, `₹${c.gross.toLocaleString()}`]), [{ content: 'Total', styles: { fontStyle: 'bold' } }, revenue.byChannel.reduce((s,c) => s+c.bookings, 0), `₹${revenue.byChannel.reduce((s,c) => s+c.gross, 0).toLocaleString()}`]] });
     if (revenue.byProperty?.length) tables.push({ title: 'Revenue by Property', head: ['Property', 'Gross Revenue'], body: [...revenue.byProperty.map(p => [p.property_name, `₹${p.gross.toLocaleString()}`]), [{ content: 'Total', styles: { fontStyle: 'bold' } }, `₹${revenue.byProperty.reduce((s,p) => s+p.gross, 0).toLocaleString()}`]] });
     generateReportPDF('Revenue Report', subTitle, tables);
   };
@@ -1649,10 +1648,6 @@ const Reports = () => {
               <span className="value">₹{report.totals.total_gross.toLocaleString()}</span>
             </div>
             <div className="summary-item">
-              <span className="label">Commissions</span>
-              <span className="value text-red">-₹{report.totals.total_commission.toLocaleString()}</span>
-            </div>
-            <div className="summary-item">
               <span className="label">Expenses</span>
               <span className="value text-red">-₹{report.totals.total_expenses.toLocaleString()}</span>
             </div>
@@ -1669,7 +1664,6 @@ const Reports = () => {
                   <th>Nights Sold</th>
                   <th>Occupancy %</th>
                   <th>Gross Revenue</th>
-                  <th>Commission</th>
                   <th>Expenses</th>
                   <th>Net Profit</th>
                 </tr>
@@ -1681,7 +1675,6 @@ const Reports = () => {
                     <td>{prop.nights_sold} / {prop.available_nights || '-'}</td>
                     <td>{prop.occupancy_percent}%</td>
                     <td>₹{prop.gross_revenue.toLocaleString()}</td>
-                    <td className="text-red">-₹{prop.commission.toLocaleString()}</td>
                     <td className="text-red">-₹{prop.expenses.toLocaleString()}</td>
                     <td className="profit">₹{prop.net_profit.toLocaleString()}</td>
                   </tr>
@@ -1734,18 +1727,16 @@ const Reports = () => {
             </div>
           </div>
           <div className="card" style={{ marginTop: '16px' }}>
-            <div className="card-header"><h3>Channel Commission Comparison</h3></div>
+            <div className="card-header"><h3>Channel Breakdown</h3></div>
             <div className="report-table">
               <table>
-                <thead><tr><th>Channel</th><th>Bookings</th><th>Gross</th><th>Commission</th><th>Net</th></tr></thead>
+                <thead><tr><th>Channel</th><th>Bookings</th><th>Revenue</th></tr></thead>
                 <tbody>
                   {revenue.byChannel?.map(ch => (
                     <tr key={ch.channel}>
                       <td>{ch.channel}</td>
                       <td>{ch.bookings}</td>
-                      <td>₹{ch.gross.toLocaleString()}</td>
-                      <td className="text-red">-₹{ch.commission.toLocaleString()}</td>
-                      <td className="profit">₹{ch.net.toLocaleString()}</td>
+                      <td className="profit">₹{ch.gross.toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1753,9 +1744,7 @@ const Reports = () => {
                   <tr style={{ fontWeight: 700, borderTop: '2px solid var(--border)' }}>
                     <td>Total</td>
                     <td>{revenue.byChannel?.reduce((s, c) => s + c.bookings, 0)}</td>
-                    <td>₹{(revenue.byChannel?.reduce((s, c) => s + c.gross, 0) || 0).toLocaleString()}</td>
-                    <td className="text-red">-₹{(revenue.byChannel?.reduce((s, c) => s + c.commission, 0) || 0).toLocaleString()}</td>
-                    <td className="profit">₹{(revenue.byChannel?.reduce((s, c) => s + c.net, 0) || 0).toLocaleString()}</td>
+                    <td className="profit">₹{(revenue.byChannel?.reduce((s, c) => s + c.gross, 0) || 0).toLocaleString()}</td>
                   </tr>
                 </tfoot>
               </table>

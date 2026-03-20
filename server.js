@@ -222,7 +222,7 @@ app.get('/api/bookings/stats/overview', async (req, res) => {
       const co = new Date(Math.min(new Date(b.check_out), monthEnd));
       return s + Math.max(0, Math.ceil((co - ci) / 86400000));
     }, 0);
-    res.json({ summary: { total_bookings: bks.length, cancelled_bookings: cancelledBks.length, total_gross: bks.reduce((s,b) => s+b.gross_amount, 0), total_commission: bks.reduce((s,b) => s+b.commission_amount, 0), total_net: bks.reduce((s,b) => s+b.net_amount, 0), confirmed_bookings: bks.length, unique_guests: new Set(bks.map(b => b.guest_id)).size }, occupancy: props.map(p => { const propBks = bks.filter(b => b.property_id === p.id); const nightsBooked = calcNights(propBks); const available = p.total_rooms * daysInMonth; return { property_id: p.id, property_name: p.name, total_nights_booked: nightsBooked, total_nights_available: available, occupancy_percent: Math.round(nightsBooked / Math.max(1, available) * 100) }; }) });
+    res.json({ summary: { total_bookings: bks.length, cancelled_bookings: cancelledBks.length, total_gross: bks.reduce((s,b) => s+b.gross_amount, 0), total_net: bks.reduce((s,b) => s+b.gross_amount, 0), confirmed_bookings: bks.length, unique_guests: new Set(bks.map(b => b.guest_id)).size }, occupancy: props.map(p => { const propBks = bks.filter(b => b.property_id === p.id); const nightsBooked = calcNights(propBks); const available = p.total_rooms * daysInMonth; return { property_id: p.id, property_name: p.name, total_nights_booked: nightsBooked, total_nights_available: available, occupancy_percent: Math.round(nightsBooked / Math.max(1, available) * 100) }; }) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 app.get('/api/bookings/:id', async (req, res) => {
@@ -309,9 +309,7 @@ app.post('/api/bookings', async (req, res) => {
     const nights = Math.max(1, Math.ceil((new Date(b.check_out) - new Date(b.check_in)) / 86400000));
     const subtotal = (b.nightly_rate || 0) * nights;
     const gross = (b.gross_amount || subtotal + (b.cleaning_fee||0) + (b.service_fee||0) + (b.taxes||0));
-    const commPct = b.channel === 'airbnb' ? 3 : b.channel === 'booking.com' ? 15 : 0;
-    const commAmt = Math.round(gross * commPct / 100);
-    const bookingData = { property_id: parseInt(b.property_id), guest_id: guestId, channel: b.channel || 'direct', channel_booking_id: b.channel_booking_id, check_in: b.check_in, check_out: b.check_out, adults: b.adults || 1, children: b.children || 0, infants: b.infants || 0, nightly_rate: b.nightly_rate || 0, subtotal, cleaning_fee: b.cleaning_fee || 0, service_fee: b.service_fee || 0, taxes: b.taxes || 0, gross_amount: gross, commission_percent: commPct, commission_amount: commAmt, net_amount: gross - commAmt, currency: 'INR', payment_status: b.payment_status || 'pending', payment_method: b.payment_method, paid_amount: b.paid_amount || 0, pending_amount: gross - (b.paid_amount || 0), booking_status: 'confirmed', guest_message: b.guest_message || '', special_requests: b.special_requests || '', check_in_time: b.check_in_time || '2:00 PM', check_out_time: b.check_out_time || '11:00 AM', confirmed_at: new Date().toISOString() };
+    const bookingData = { property_id: parseInt(b.property_id), guest_id: guestId, channel: b.channel || 'direct', channel_booking_id: b.channel_booking_id, check_in: b.check_in, check_out: b.check_out, adults: b.adults || 1, children: b.children || 0, infants: b.infants || 0, nightly_rate: b.nightly_rate || 0, subtotal, cleaning_fee: b.cleaning_fee || 0, service_fee: b.service_fee || 0, taxes: b.taxes || 0, gross_amount: gross, commission_percent: 0, commission_amount: 0, net_amount: gross, currency: 'INR', payment_status: b.payment_status || 'pending', payment_method: b.payment_method, paid_amount: b.paid_amount || 0, pending_amount: gross - (b.paid_amount || 0), booking_status: 'confirmed', guest_message: b.guest_message || '', special_requests: b.special_requests || '', check_in_time: b.check_in_time || '2:00 PM', check_out_time: b.check_out_time || '4:00 PM', confirmed_at: new Date().toISOString() };
 
     let booking;
     if (useMongo) {
@@ -613,7 +611,7 @@ app.get('/api/reports/dashboard', async (req, res) => {
     const guests = useMongo ? await Guest.find().lean() : store.guests;
     res.json({
       today: { today_checkins: bks.filter(b => b.check_in === today).length, today_checkouts: bks.filter(b => b.check_out === today).length, today_revenue: bks.filter(b => b.check_in === today).reduce((s,b) => s+b.net_amount, 0) },
-      month: { total_bookings: bks.length, gross_revenue: bks.reduce((s,b) => s+b.gross_amount, 0), net_revenue: bks.reduce((s,b) => s+b.net_amount, 0), commission: bks.reduce((s,b) => s+b.commission_amount, 0) },
+      month: { total_bookings: bks.length, gross_revenue: bks.reduce((s,b) => s+b.gross_amount, 0), net_revenue: bks.reduce((s,b) => s+b.gross_amount, 0) },
       occupancy: props.map(p => { const pb = bks.filter(b => b.property_id === p.id); return { name: p.name, booked_nights: pb.length, available_nights: p.total_rooms * 30, occupancy: Math.round(pb.length / Math.max(1, p.total_rooms * 30) * 100) }; }),
       upcoming: bks.filter(b => b.check_in >= today).sort((a,b) => a.check_in.localeCompare(b.check_in)).slice(0, 5).map(b => { const p = props.find(pr => pr.id === b.property_id) || {}; const g = guests.find(gs => gs.id === b.guest_id) || {}; return { id: b.id, check_in: b.check_in, check_out: b.check_out, property_name: p.name, first_name: g.first_name, last_name: g.last_name }; })
     });
@@ -645,13 +643,12 @@ app.get('/api/reports/profit-loss', async (req, res) => {
         return s + Math.max(0, Math.ceil((co - ci) / 86400000));
       }, 0);
       const gross = pb.reduce((s,b) => s+b.gross_amount, 0);
-      const comm = pb.reduce((s,b) => s+b.commission_amount, 0);
       const propExps = monthExps.filter(e => e.property_id === p.id).reduce((s,e) => s+e.amount, 0);
       const exps = propExps + commonPerProp;
       const availableNights = p.total_rooms * daysInMonth;
-      return { property_id: p.id, property_name: p.name, occupancy_percent: Math.round(nightsSold / Math.max(1, availableNights) * 100), nights_sold: nightsSold, available_nights: availableNights, gross_revenue: gross, commission: comm, expenses: exps, net_profit: gross - comm - exps };
+      return { property_id: p.id, property_name: p.name, occupancy_percent: Math.round(nightsSold / Math.max(1, availableNights) * 100), nights_sold: nightsSold, available_nights: availableNights, gross_revenue: gross, expenses: exps, net_profit: gross - exps };
     });
-    const totals = { total_gross: properties.reduce((s,p) => s+p.gross_revenue, 0), total_commission: properties.reduce((s,p) => s+p.commission, 0), total_expenses: properties.reduce((s,p) => s+p.expenses, 0), total_net: properties.reduce((s,p) => s+p.net_profit, 0), total_occupancy: properties.length ? Math.round(properties.reduce((s,p) => s+p.occupancy_percent, 0)/properties.length) : 0 };
+    const totals = { total_gross: properties.reduce((s,p) => s+p.gross_revenue, 0), total_expenses: properties.reduce((s,p) => s+p.expenses, 0), total_net: properties.reduce((s,p) => s+p.net_profit, 0), total_occupancy: properties.length ? Math.round(properties.reduce((s,p) => s+p.occupancy_percent, 0)/properties.length) : 0 };
     res.json({ period: { year, month, startDate, endDate }, properties, totals });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -681,7 +678,7 @@ app.get('/api/reports/revenue', async (req, res) => {
     let bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.check_in >= startDate && b.check_in <= endDate);
     if (propFilter) bks = bks.filter(b => b.property_id === propFilter);
     const props = useMongo ? await Property.find().lean() : store.properties;
-    const byChannel = {}; bks.forEach(b => { if (!byChannel[b.channel]) byChannel[b.channel] = { channel: b.channel, bookings: 0, gross: 0, commission: 0, net: 0 }; byChannel[b.channel].bookings++; byChannel[b.channel].gross += b.gross_amount; byChannel[b.channel].commission += b.commission_amount; byChannel[b.channel].net += b.net_amount; });
+    const byChannel = {}; bks.forEach(b => { if (!byChannel[b.channel]) byChannel[b.channel] = { channel: b.channel, bookings: 0, gross: 0, net: 0 }; byChannel[b.channel].bookings++; byChannel[b.channel].gross += b.gross_amount; byChannel[b.channel].net += b.gross_amount; });
     const byMonth = {}; bks.forEach(b => { const m = b.check_in.substring(0,7); if (!byMonth[m]) byMonth[m] = { month: m, bookings: 0, gross: 0, net: 0 }; byMonth[m].bookings++; byMonth[m].gross += b.gross_amount; byMonth[m].net += b.net_amount; });
     const byProperty = {}; bks.forEach(b => { const pn = (props.find(p => p.id === b.property_id)||{}).name || 'Unknown'; if (!byProperty[pn]) byProperty[pn] = { property_name: pn, bookings: 0, gross: 0, net: 0 }; byProperty[pn].bookings++; byProperty[pn].gross += b.gross_amount; byProperty[pn].net += b.net_amount; });
     res.json({ byChannel: Object.values(byChannel), byMonth: Object.values(byMonth), byProperty: Object.values(byProperty) });
@@ -1435,7 +1432,7 @@ app.get('/', (req, res) => {
               '<div class="activity-item">' +
                 '<span class="activity-dot checkout"></span>' +
                 '<span class="activity-text">' + (b.guest_name || b.guestName || 'Guest') + ' - ' + (b.property_name || b.propertyName || 'Property') + '</span>' +
-                '<span class="activity-time">' + (b.check_out_time || '11:00 AM') + '</span>' +
+                '<span class="activity-time">' + (b.check_out_time || '4:00 PM') + '</span>' +
               '</div>'
             ).join('');
           } else {

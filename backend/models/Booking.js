@@ -29,7 +29,7 @@ const bookingSchema = new mongoose.Schema({
   guest_message: String,
   special_requests: String,
   check_in_time: { type: String, default: '2:00 PM' },
-  check_out_time: { type: String, default: '11:00 AM' },
+  check_out_time: { type: String, default: '4:00 PM' },
   actual_check_in: String,
   actual_check_out: String,
   confirmed_at: String,
