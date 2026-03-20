@@ -789,6 +789,7 @@ const Bookings = () => {
     if (filterDateFrom) filtered = filtered.filter(b => b.check_in >= filterDateFrom);
     if (filterDateTo) filtered = filtered.filter(b => b.check_out <= filterDateTo);
     if (hidePast) { const today = new Date().toISOString().split('T')[0]; filtered = filtered.filter(b => b.check_out >= today || b.booking_status === 'confirmed' || b.booking_status === 'checked_in'); }
+    filtered.sort((a, b) => a.check_in < b.check_in ? 1 : a.check_in > b.check_in ? -1 : 0);
     setBookings(filtered);
   }, [filter, filterProperty, filterChannel, filterDateFrom, filterDateTo, hidePast, allBookings]);
 
