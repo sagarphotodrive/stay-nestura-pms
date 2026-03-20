@@ -309,7 +309,7 @@ app.post('/api/bookings', async (req, res) => {
     const nights = Math.max(1, Math.ceil((new Date(b.check_out) - new Date(b.check_in)) / 86400000));
     const subtotal = (b.nightly_rate || 0) * nights;
     const gross = (b.gross_amount || subtotal + (b.cleaning_fee||0) + (b.service_fee||0) + (b.taxes||0));
-    const bookingData = { property_id: parseInt(b.property_id), guest_id: guestId, channel: b.channel || 'direct', channel_booking_id: b.channel_booking_id, check_in: b.check_in, check_out: b.check_out, adults: b.adults || 1, children: b.children || 0, infants: b.infants || 0, nightly_rate: b.nightly_rate || 0, subtotal, cleaning_fee: b.cleaning_fee || 0, service_fee: b.service_fee || 0, taxes: b.taxes || 0, gross_amount: gross, commission_percent: 0, commission_amount: 0, net_amount: gross, currency: 'INR', payment_status: b.payment_status || 'pending', payment_method: b.payment_method, paid_amount: b.paid_amount || 0, pending_amount: gross - (b.paid_amount || 0), booking_status: 'confirmed', guest_message: b.guest_message || '', special_requests: b.special_requests || '', check_in_time: b.check_in_time || '2:00 PM', check_out_time: b.check_out_time || '4:00 PM', confirmed_at: new Date().toISOString() };
+    const bookingData = { property_id: parseInt(b.property_id), guest_id: guestId, channel: b.channel || 'direct', channel_booking_id: b.channel_booking_id, check_in: b.check_in, check_out: b.check_out, adults: b.adults || 1, children: b.children || 0, infants: b.infants || 0, nightly_rate: b.nightly_rate || 0, subtotal, cleaning_fee: b.cleaning_fee || 0, service_fee: b.service_fee || 0, taxes: b.taxes || 0, gross_amount: gross, commission_percent: 0, commission_amount: 0, net_amount: gross, currency: 'INR', payment_status: b.payment_status || 'pending', payment_method: b.payment_method, paid_amount: b.paid_amount || 0, pending_amount: gross - (b.paid_amount || 0), booking_status: 'confirmed', guest_message: b.guest_message || '', special_requests: b.special_requests || '', check_in_time: b.check_in_time || '4:00 PM', check_out_time: b.check_out_time || '2:00 PM', confirmed_at: new Date().toISOString() };
 
     let booking;
     if (useMongo) {
@@ -1419,7 +1419,7 @@ app.get('/', (req, res) => {
               '<div class="activity-item">' +
                 '<span class="activity-dot checkin"></span>' +
                 '<span class="activity-text">' + (b.guest_name || b.guestName || 'Guest') + ' - ' + (b.property_name || b.propertyName || 'Property') + '</span>' +
-                '<span class="activity-time">' + (b.check_in_time || '2:00 PM') + '</span>' +
+                '<span class="activity-time">' + (b.check_in_time || '4:00 PM') + '</span>' +
               '</div>'
             ).join('');
           } else {
@@ -1432,7 +1432,7 @@ app.get('/', (req, res) => {
               '<div class="activity-item">' +
                 '<span class="activity-dot checkout"></span>' +
                 '<span class="activity-text">' + (b.guest_name || b.guestName || 'Guest') + ' - ' + (b.property_name || b.propertyName || 'Property') + '</span>' +
-                '<span class="activity-time">' + (b.check_out_time || '4:00 PM') + '</span>' +
+                '<span class="activity-time">' + (b.check_out_time || '2:00 PM') + '</span>' +
               '</div>'
             ).join('');
           } else {

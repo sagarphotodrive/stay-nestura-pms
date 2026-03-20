@@ -415,8 +415,8 @@ const generateBookingWhatsAppMsg = (b, prop) => {
   const guestCount = [];
   if (b.adults) guestCount.push(`${b.adults} Adult${b.adults > 1 ? 's' : ''}`);
   if (b.children) guestCount.push(`${b.children} Child${b.children > 1 ? 'ren' : ''}`);
-  const checkInTime = b.check_in_time || '2:00 PM';
-  const checkOutTime = b.check_out_time || '4:00 PM';
+  const checkInTime = b.check_in_time || '4:00 PM';
+  const checkOutTime = b.check_out_time || '2:00 PM';
   let paymentLine = `Total ₹${total.toLocaleString('en-IN')}`;
   if (advance > 0 && balance > 0) {
     paymentLine += ` | Advance ₹${advance.toLocaleString('en-IN')}\nBalance ₹${balance.toLocaleString('en-IN')} (payable at check-in)`;
