@@ -3,6 +3,8 @@ import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate,
 import { io } from 'socket.io-client';
 import axios from 'axios';
 import { format, addDays } from 'date-fns';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 import {
   LayoutDashboard, Building2, Calendar, Users,
   IndianRupee, BarChart3, Settings, Bell, Menu, X,
@@ -1267,16 +1269,27 @@ const Expenses = () => {
     try { await api.delete(`/expenses/${id}`); fetchExpenses(); } catch (err) { console.error(err); }
   };
 
+  const downloadExpensesPDF = () => {
+    const dateRange = (expFilterDateFrom || expFilterDateTo) ? `${expFilterDateFrom || 'Start'} to ${expFilterDateTo || 'Now'}` : 'All Time';
+    const total = expenses.reduce((s, e) => s + parseFloat(e.amount || 0), 0);
+    generateReportPDF('Expenses', dateRange, [{
+      title: `Expense Details (${expenses.length} transactions)`,
+      head: ['Date', 'Description', 'Category', 'Property', 'Payment', 'Amount'],
+      body: [...expenses.map(e => [format(new Date(e.expense_date), 'dd MMM yyyy'), e.description, e.category.replace(/_/g, ' '), e.property_id === 0 ? 'Common' : (e.property_name || '-'), e.payment_method, `₹${parseFloat(e.amount).toLocaleString()}`]),
+        [{ content: 'Total', styles: { fontStyle: 'bold' }, colSpan: 5 }, `₹${total.toLocaleString()}`]]
+    }], [{ label: 'Total Expenses', value: `₹${total.toLocaleString()}` }, { label: 'Transactions', value: String(expenses.length) }]);
+  };
+
   if (loading) return <LoadingSpinner />;
 
   return (
     <div className="expenses-page">
       <div className="page-header">
         <h1>Expenses</h1>
-        <button className="btn btn-primary" onClick={openExpForm}>
-          <Plus size={18} />
-          Add Expense
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button className="btn btn-primary" onClick={downloadExpensesPDF}><Download size={16} /> PDF</button>
+          <button className="btn btn-primary" onClick={openExpForm}><Plus size={18} /> Add Expense</button>
+        </div>
       </div>
 
       {showForm && (
@@ -1409,6 +1422,41 @@ const Expenses = () => {
 };
 
 // Reports Component — Enhanced with multiple tabs
+const generateReportPDF = (title, monthLabel, tables, summaryCards) => {
+  const doc = new jsPDF();
+  const pageW = doc.internal.pageSize.getWidth();
+  doc.setFontSize(18); doc.setFont('helvetica', 'bold'); doc.setTextColor(27, 42, 74);
+  doc.text('Stay Nestura', 14, 18);
+  doc.setFontSize(13); doc.setFont('helvetica', 'normal'); doc.setTextColor(100);
+  doc.text(title, 14, 26);
+  doc.setFontSize(10); doc.text(monthLabel, pageW - 14, 18, { align: 'right' });
+  doc.setDrawColor(201, 169, 110); doc.setLineWidth(0.8); doc.line(14, 30, pageW - 14, 30);
+  let y = 36;
+  if (summaryCards && summaryCards.length > 0) {
+    const colW = (pageW - 28) / Math.min(summaryCards.length, 4);
+    summaryCards.forEach((card, i) => {
+      const x = 14 + (i % 4) * colW;
+      const row = Math.floor(i / 4);
+      const cy = y + row * 20;
+      doc.setFillColor(250, 248, 245); doc.roundedRect(x, cy, colW - 4, 16, 2, 2, 'F');
+      doc.setFontSize(7); doc.setTextColor(100); doc.setFont('helvetica', 'normal');
+      doc.text(card.label, x + 3, cy + 6);
+      doc.setFontSize(11); doc.setTextColor(27, 42, 74); doc.setFont('helvetica', 'bold');
+      doc.text(card.value, x + 3, cy + 13);
+    });
+    y += Math.ceil(summaryCards.length / 4) * 20 + 4;
+  }
+  tables.forEach(tbl => {
+    if (y > 260) { doc.addPage(); y = 20; }
+    if (tbl.title) { doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(27, 42, 74); doc.text(tbl.title, 14, y); y += 6; }
+    doc.autoTable({ startY: y, head: [tbl.head], body: tbl.body, theme: 'grid', styles: { fontSize: 8, cellPadding: 3, font: 'helvetica' }, headStyles: { fillColor: [27, 42, 74], textColor: 255, fontStyle: 'bold', fontSize: 8 }, alternateRowStyles: { fillColor: [250, 248, 245] }, margin: { left: 14, right: 14 } });
+    y = doc.lastAutoTable.finalY + 10;
+  });
+  doc.setFontSize(7); doc.setTextColor(150);
+  doc.text(`Generated on ${format(new Date(), 'dd MMM yyyy, hh:mm a')} | Stay Nestura PMS`, 14, doc.internal.pageSize.getHeight() - 8);
+  doc.save(`Stay-Nestura-${title.replace(/[^a-zA-Z0-9]/g, '-')}-${monthLabel.replace(/\s/g, '-')}.pdf`);
+};
+
 const Reports = () => {
   const [activeTab, setActiveTab] = useState('pnl');
   const [report, setReport] = useState(null);
@@ -1456,6 +1504,96 @@ const Reports = () => {
     setLoading(false);
   };
 
+  const monthLabel = `${format(new Date(year, month - 1), 'MMMM yyyy')}`;
+  const propLabel = propertyId ? (properties.find(p => p.id === parseInt(propertyId))?.name || '') : 'All Properties';
+  const subTitle = `${monthLabel} | ${propLabel}`;
+
+  const downloadPnlPDF = () => {
+    if (!report) return;
+    generateReportPDF('Profit & Loss Report', subTitle, [{
+      title: 'Property-wise P&L',
+      head: ['Property', 'Nights Sold', 'Occupancy %', 'Gross Revenue', 'Commission', 'Expenses', 'Net Profit'],
+      body: [...report.properties.map(p => [p.property_name, `${p.nights_sold}/${p.available_nights}`, `${p.occupancy_percent}%`, `₹${p.gross_revenue.toLocaleString()}`, `-₹${p.commission.toLocaleString()}`, `-₹${p.expenses.toLocaleString()}`, `₹${p.net_profit.toLocaleString()}`]),
+        [{ content: 'Total', styles: { fontStyle: 'bold' } }, '', '', `₹${report.totals.total_gross.toLocaleString()}`, `-₹${report.totals.total_commission.toLocaleString()}`, `-₹${report.totals.total_expenses.toLocaleString()}`, `₹${report.totals.total_net.toLocaleString()}`]]
+    }], [
+      { label: 'Total Revenue', value: `₹${report.totals.total_gross.toLocaleString()}` },
+      { label: 'Commissions', value: `-₹${report.totals.total_commission.toLocaleString()}` },
+      { label: 'Expenses', value: `-₹${report.totals.total_expenses.toLocaleString()}` },
+      { label: 'Net Profit', value: `₹${report.totals.total_net.toLocaleString()}` }
+    ]);
+  };
+
+  const downloadRevenuePDF = () => {
+    if (!revenue) return;
+    const tables = [];
+    if (revenue.byChannel?.length) tables.push({ title: 'Revenue by Channel', head: ['Channel', 'Bookings', 'Gross', 'Commission', 'Net'], body: [...revenue.byChannel.map(c => [c.channel, c.bookings, `₹${c.gross.toLocaleString()}`, `-₹${c.commission.toLocaleString()}`, `₹${c.net.toLocaleString()}`]), [{ content: 'Total', styles: { fontStyle: 'bold' } }, revenue.byChannel.reduce((s,c) => s+c.bookings, 0), `₹${revenue.byChannel.reduce((s,c) => s+c.gross, 0).toLocaleString()}`, `-₹${revenue.byChannel.reduce((s,c) => s+c.commission, 0).toLocaleString()}`, `₹${revenue.byChannel.reduce((s,c) => s+c.net, 0).toLocaleString()}`]] });
+    if (revenue.byProperty?.length) tables.push({ title: 'Revenue by Property', head: ['Property', 'Gross Revenue'], body: [...revenue.byProperty.map(p => [p.property_name, `₹${p.gross.toLocaleString()}`]), [{ content: 'Total', styles: { fontStyle: 'bold' } }, `₹${revenue.byProperty.reduce((s,p) => s+p.gross, 0).toLocaleString()}`]] });
+    generateReportPDF('Revenue Report', subTitle, tables);
+  };
+
+  const downloadOccupancyPDF = () => {
+    if (!occupancy) return;
+    generateReportPDF('Occupancy Report', subTitle, [{
+      title: 'Property Occupancy',
+      head: ['Property', 'Nights Booked', 'Nights Available', 'Occupancy %'],
+      body: occupancy.occupancy?.map(p => [p.property_name, p.total_nights_booked, p.total_nights_available, `${p.occupancy_percent}%`]) || []
+    }], [
+      { label: 'Total Bookings', value: String(occupancy.summary?.total_bookings || 0) },
+      { label: 'Unique Guests', value: String(occupancy.summary?.unique_guests || 0) },
+      { label: 'Gross Revenue', value: `₹${(occupancy.summary?.total_gross || 0).toLocaleString()}` },
+      { label: 'Net Revenue', value: `₹${(occupancy.summary?.total_net || 0).toLocaleString()}` }
+    ]);
+  };
+
+  const downloadExpensesPDF = () => {
+    if (!expSummary) return;
+    const tables = [];
+    if (expSummary.byCategory?.length) tables.push({ title: 'Expenses by Category', head: ['Category', 'Count', 'Total'], body: expSummary.byCategory.map(c => [c.category, c.count, `₹${c.total.toLocaleString()}`]) });
+    if (expSummary.byProperty?.length) tables.push({ title: 'Expenses by Property', head: ['Property', 'Total'], body: expSummary.byProperty.map(p => [p.property_name, `₹${p.total.toLocaleString()}`]) });
+    generateReportPDF('Expenses Report', subTitle, tables, [{ label: 'Total Expenses', value: `₹${(expSummary.total || 0).toLocaleString()}` }]);
+  };
+
+  const downloadGuestsPDF = () => {
+    if (!guestAnalytics) return;
+    generateReportPDF('Guest Analytics', subTitle, [{
+      title: 'Top Guests by Lifetime Value',
+      head: ['#', 'Guest', 'Phone', 'Stays', 'Lifetime Value'],
+      body: guestAnalytics.topGuests?.map((g, i) => [i + 1, g.name, g.phone || '-', g.total_stays, `₹${g.lifetime_value.toLocaleString()}`]) || []
+    }], [
+      { label: 'Total Guests', value: String(guestAnalytics.total_guests) },
+      { label: 'New Guests', value: String(guestAnalytics.new_guests) },
+      { label: 'Repeat Guests', value: String(guestAnalytics.repeat_guests) },
+      { label: 'Repeat Rate', value: `${guestAnalytics.repeat_rate}%` }
+    ]);
+  };
+
+  const downloadPaymentsPDF = () => {
+    if (!paymentSummary) return;
+    generateReportPDF('Payment Summary', subTitle, [{
+      title: 'Payment Breakdown',
+      head: ['Status', 'Count', 'Amount'],
+      body: [
+        ['Fully Paid', paymentSummary.paid.count, `₹${paymentSummary.paid.total.toLocaleString()}`],
+        ['Partial - Collected', paymentSummary.partial.count, `₹${paymentSummary.partial.collected.toLocaleString()}`],
+        ['Partial - Remaining', '', `₹${paymentSummary.partial.remaining.toLocaleString()}`],
+        ['Pending', paymentSummary.pending.count, `₹${paymentSummary.pending.total.toLocaleString()}`],
+        [{ content: 'Total Collected', styles: { fontStyle: 'bold' } }, '', `₹${paymentSummary.total_collected.toLocaleString()}`],
+        [{ content: 'Total Pending', styles: { fontStyle: 'bold' } }, '', `₹${paymentSummary.total_pending.toLocaleString()}`]
+      ]
+    }]);
+  };
+
+  const downloadAdrPDF = () => {
+    if (!adrData) return;
+    generateReportPDF('ADR Report', subTitle, [{
+      title: 'Average Daily Rate by Property',
+      head: ['Property', 'Base Price', 'Nights Sold', 'Total Revenue', 'ADR', 'vs Base'],
+      body: adrData.properties?.map(p => [p.property_name, `₹${p.base_price.toLocaleString()}`, p.nights_sold, `₹${p.total_revenue.toLocaleString()}`, `₹${p.adr.toLocaleString()}`, p.base_price > 0 ? `${p.adr >= p.base_price ? '+' : ''}${Math.round((p.adr - p.base_price) / p.base_price * 100)}%` : 'N/A']) || []
+    }], [{ label: 'Overall ADR', value: `₹${adrData.overall_adr.toLocaleString()}` }]);
+  };
+
+  const downloadMap = { pnl: downloadPnlPDF, revenue: downloadRevenuePDF, occupancy: downloadOccupancyPDF, expenses: downloadExpensesPDF, guests: downloadGuestsPDF, payments: downloadPaymentsPDF, adr: downloadAdrPDF };
+
   if (loading) return <LoadingSpinner />;
 
   const tabs = [
@@ -1495,10 +1633,11 @@ const Reports = () => {
         </div>
       </div>
 
-      <div className="report-tabs">
+      <div className="report-tabs" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
         {tabs.map(tab => (
           <button key={tab.id} className={`report-tab ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>
         ))}
+        <button className="btn btn-sm btn-primary" onClick={() => downloadMap[activeTab]()} style={{ marginLeft: 'auto' }}><Download size={14} /> Download PDF</button>
       </div>
 
       {/* P&L Tab */}
