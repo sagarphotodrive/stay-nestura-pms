@@ -461,6 +461,15 @@ const copyBookingMessage = (b, prop) => {
   });
 };
 
+const PROPERTY_COLORS = [
+  { bg: 'rgba(99, 102, 241, 0.20)', border: 'rgba(99, 102, 241, 0.15)', badge: '#6366f1' },   // Indigo - Torna
+  { bg: 'rgba(245, 158, 11, 0.20)', border: 'rgba(245, 158, 11, 0.15)', badge: '#f59e0b' },    // Amber - Shivneri
+  { bg: 'rgba(16, 185, 129, 0.20)', border: 'rgba(16, 185, 129, 0.15)', badge: '#10b981' },    // Emerald - Solapur 2
+  { bg: 'rgba(236, 72, 153, 0.20)', border: 'rgba(236, 72, 153, 0.15)', badge: '#ec4899' },    // Pink - Solapur 1
+  { bg: 'rgba(14, 165, 233, 0.20)', border: 'rgba(14, 165, 233, 0.15)', badge: '#0ea5e9' },    // Sky - Single Room
+  { bg: 'rgba(168, 85, 247, 0.20)', border: 'rgba(168, 85, 247, 0.15)', badge: '#a855f7' },    // Purple - Deluxe
+];
+
 const MasterCalendar = () => {
   const [properties, setProperties] = useState([]);
   const [bookings, setBookings] = useState([]);
@@ -548,9 +557,11 @@ const MasterCalendar = () => {
         </div>
 
         <div className="calendar-body">
-          {properties.map(property => (
+          {properties.map((property, propIdx) => {
+            const color = PROPERTY_COLORS[propIdx % PROPERTY_COLORS.length];
+            return (
             <div key={property.id} className="calendar-row">
-              <div className="property-col">{property.name}</div>
+              <div className="property-col" style={{ borderLeft: `4px solid ${color.badge}` }}>{property.name}</div>
               {days.map(day => {
                 const booking = getBookingForDate(property.id, day);
                 const isToday = format(day, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd');
@@ -558,7 +569,7 @@ const MasterCalendar = () => {
                   <div
                     key={day.toISOString()}
                     className={`day-cell ${booking ? 'booked' : 'available-click'} ${isToday ? 'today' : ''}`}
-                    style={{ cursor: 'pointer' }}
+                    style={booking ? { background: color.bg, borderRightColor: color.border, cursor: 'pointer' } : { cursor: 'pointer' }}
                     onClick={() => {
                       if (booking) {
                         setSelectedBooking(booking);
@@ -571,7 +582,7 @@ const MasterCalendar = () => {
                     title={booking ? `${booking.first_name} ${booking.last_name} - ${booking.channel}` : `Click to book ${property.name} on ${format(day, 'MMM dd')}`}
                   >
                     {booking ? (
-                      <div className="booking-badge" title={`${booking.first_name} ${booking.last_name}`}>
+                      <div className="booking-badge" style={{ background: color.badge }} title={`${booking.first_name} ${booking.last_name}`}>
                         {booking.first_name?.[0]}
                       </div>
                     ) : (
@@ -581,7 +592,8 @@ const MasterCalendar = () => {
                 );
               })}
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -790,7 +802,7 @@ const Bookings = () => {
     if (filterChannel) filtered = filtered.filter(b => b.channel === filterChannel);
     if (filterDateFrom) filtered = filtered.filter(b => b.check_in >= filterDateFrom);
     if (filterDateTo) filtered = filtered.filter(b => b.check_out <= filterDateTo);
-    if (hidePast) { const today = new Date().toISOString().split('T')[0]; filtered = filtered.filter(b => b.check_out >= today || b.booking_status === 'confirmed' || b.booking_status === 'checked_in'); }
+    if (hidePast) { const today = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })).toISOString().split('T')[0]; filtered = filtered.filter(b => b.check_out >= today); }
     filtered.sort((a, b) => a.check_in < b.check_in ? 1 : a.check_in > b.check_in ? -1 : 0);
     setBookings(filtered);
   }, [filter, filterProperty, filterChannel, filterDateFrom, filterDateTo, hidePast, allBookings]);
