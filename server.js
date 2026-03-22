@@ -176,25 +176,31 @@ app.post('/api/properties/:id/rates', async (req, res) => {
 async function enrichBooking(b, propsCache, guestsCache) {
   const p = propsCache ? propsCache.find(pr => pr.id === b.property_id) : (useMongo ? await Property.findOne({ id: b.property_id }).lean() : store.properties.find(pr => pr.id === b.property_id)) || {};
   const g = guestsCache ? guestsCache.find(gs => gs.id === b.guest_id) : (useMongo ? await Guest.findOne({ id: b.guest_id }).lean() : store.guests.find(gs => gs.id === b.guest_id)) || {};
-  return { ...b, property_name: p.name, address: p.address, google_maps_link: p.google_maps_link, first_name: g.first_name, last_name: g.last_name, email: g.email, phone: g.phone, guests: (b.adults||0)+(b.children||0) };
+  return { ...b, property_name: p.name, address: p.address, google_maps_link: p.google_maps_link, first_name: g.first_name, last_name: g.last_name, email: g.email, phone: g.phone, guest_name: `${g.first_name || ''} ${g.last_name || ''}`.trim(), guests: (b.adults||0)+(b.children||0) };
 }
 
 app.get('/api/bookings/today', async (req, res) => {
   try {
-    const today = new Date().toISOString().split('T')[0];
-    let checkIns, checkOuts, props, guests;
+    const today = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })).toISOString().split('T')[0];
+    let checkIns, checkOuts, currentStay, props, guests;
     if (useMongo) {
-      [checkIns, checkOuts, props, guests] = await Promise.all([
-        Booking.find({ check_in: today, booking_status: { $ne: 'cancelled' } }).lean(),
-        Booking.find({ check_out: today, booking_status: { $ne: 'cancelled' } }).lean(),
+      [checkIns, checkOuts, currentStay, props, guests] = await Promise.all([
+        Booking.find({ check_in: today, booking_status: { $in: ['confirmed', 'checked-in'] } }).lean(),
+        Booking.find({ check_out: today, booking_status: 'checked-in' }).lean(),
+        Booking.find({ check_in: { $lte: today }, check_out: { $gt: today }, booking_status: 'checked-in' }).lean(),
         Property.find().lean(), Guest.find().lean()
       ]);
     } else {
-      checkIns = store.bookings.filter(b => b.check_in === today && b.booking_status !== 'cancelled');
-      checkOuts = store.bookings.filter(b => b.check_out === today && b.booking_status !== 'cancelled');
+      checkIns = store.bookings.filter(b => b.check_in === today && (b.booking_status === 'confirmed' || b.booking_status === 'checked-in'));
+      checkOuts = store.bookings.filter(b => b.check_out === today && b.booking_status === 'checked-in');
+      currentStay = store.bookings.filter(b => b.check_in <= today && b.check_out > today && b.booking_status === 'checked-in');
       props = store.properties; guests = store.guests;
     }
-    res.json({ checkIns: await Promise.all(checkIns.map(b => enrichBooking(b, props, guests))), checkOuts: await Promise.all(checkOuts.map(b => enrichBooking(b, props, guests))) });
+    res.json({
+      checkIns: await Promise.all(checkIns.map(b => enrichBooking(b, props, guests))),
+      checkOuts: await Promise.all(checkOuts.map(b => enrichBooking(b, props, guests))),
+      currentStay: await Promise.all((currentStay || []).map(b => enrichBooking(b, props, guests)))
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 app.get('/api/bookings/stats/overview', async (req, res) => {
@@ -604,16 +610,22 @@ app.delete('/api/expenses/:id', async (req, res) => {
 // --- REPORTS ---
 app.get('/api/reports/dashboard', async (req, res) => {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })).toISOString().split('T')[0];
     const allBks = useMongo ? await Booking.find().lean() : store.bookings;
     const bks = allBks.filter(b => b.booking_status !== 'cancelled');
     const props = useMongo ? await Property.find({ is_active: true }).lean() : store.properties.filter(p => p.is_active);
     const guests = useMongo ? await Guest.find().lean() : store.guests;
+    const monthStart = today.substring(0, 7) + '-01';
+    const monthBks = bks.filter(b => b.check_in >= monthStart && b.check_in <= today);
     res.json({
-      today: { today_checkins: bks.filter(b => b.check_in === today).length, today_checkouts: bks.filter(b => b.check_out === today).length, today_revenue: bks.filter(b => b.check_in === today).reduce((s,b) => s+b.net_amount, 0) },
-      month: { total_bookings: bks.length, gross_revenue: bks.reduce((s,b) => s+b.gross_amount, 0), net_revenue: bks.reduce((s,b) => s+b.gross_amount, 0) },
-      occupancy: props.map(p => { const pb = bks.filter(b => b.property_id === p.id); return { name: p.name, booked_nights: pb.length, available_nights: p.total_rooms * 30, occupancy: Math.round(pb.length / Math.max(1, p.total_rooms * 30) * 100) }; }),
-      upcoming: bks.filter(b => b.check_in >= today).sort((a,b) => a.check_in.localeCompare(b.check_in)).slice(0, 5).map(b => { const p = props.find(pr => pr.id === b.property_id) || {}; const g = guests.find(gs => gs.id === b.guest_id) || {}; return { id: b.id, check_in: b.check_in, check_out: b.check_out, property_name: p.name, first_name: g.first_name, last_name: g.last_name }; })
+      today: {
+        today_checkins: bks.filter(b => b.check_in === today && (b.booking_status === 'confirmed' || b.booking_status === 'checked-in')).length,
+        today_checkouts: bks.filter(b => b.check_out === today && b.booking_status === 'checked-in').length,
+        today_revenue: bks.filter(b => b.check_in === today).reduce((s,b) => s+b.net_amount, 0)
+      },
+      month: { total_bookings: monthBks.length, gross_revenue: monthBks.reduce((s,b) => s+b.gross_amount, 0), net_revenue: monthBks.reduce((s,b) => s+b.net_amount, 0) },
+      occupancy: props.map(p => { const pb = bks.filter(b => b.property_id === p.id && b.check_in <= today && b.check_out > today); return { name: p.name, booked_nights: pb.length, available_nights: p.total_rooms * 30, occupancy: Math.round(pb.length / Math.max(1, p.total_rooms * 30) * 100) }; }),
+      upcoming: bks.filter(b => b.check_in >= today && b.booking_status === 'confirmed').sort((a,b) => a.check_in.localeCompare(b.check_in)).slice(0, 5).map(b => { const p = props.find(pr => pr.id === b.property_id) || {}; const g = guests.find(gs => gs.id === b.guest_id) || {}; return { id: b.id, check_in: b.check_in, check_out: b.check_out, property_name: p.name, first_name: g.first_name, last_name: g.last_name }; })
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -654,14 +666,14 @@ app.get('/api/reports/profit-loss', async (req, res) => {
 });
 app.get('/api/reports/daily-brief', async (req, res) => {
   try {
-    const today = new Date().toISOString().split('T')[0];
-    const tomorrow = new Date(Date.now()+86400000).toISOString().split('T')[0];
+    const today = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })).toISOString().split('T')[0];
+    const tomorrow = new Date(new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })).getTime()+86400000).toISOString().split('T')[0];
     const allBks = useMongo ? await Booking.find().lean() : store.bookings;
     const bks = allBks.filter(b => b.booking_status !== 'cancelled');
     const props = useMongo ? await Property.find().lean() : store.properties;
     const guests = useMongo ? await Guest.find().lean() : store.guests;
-    const enrich = b => { const p = props.find(pr => pr.id === b.property_id) || {}; const g = guests.find(gs => gs.id === b.guest_id) || {}; return { ...b, property_name: p.name, address: p.address, google_maps_link: p.google_maps_link, first_name: g.first_name, last_name: g.last_name, phone: g.phone, guests: (b.adults||0)+(b.children||0) }; };
-    res.json({ date: today, checkIns: bks.filter(b => b.check_in === today).map(enrich), checkOuts: bks.filter(b => b.check_out === today && b.booking_status === 'checked-in').map(enrich), pendingPayments: bks.filter(b => b.pending_amount > 0).map(enrich), cleaningRequired: [...new Set(bks.filter(b => b.check_out === today || b.check_in === tomorrow).map(b => (props.find(p => p.id === b.property_id)||{}).name))].filter(Boolean).map(n => ({ property_name: n })), maintenanceFlags: [] });
+    const enrich = b => { const p = props.find(pr => pr.id === b.property_id) || {}; const g = guests.find(gs => gs.id === b.guest_id) || {}; return { ...b, property_name: p.name, address: p.address, google_maps_link: p.google_maps_link, first_name: g.first_name, last_name: g.last_name, phone: g.phone, guest_name: `${g.first_name || ''} ${g.last_name || ''}`.trim(), guests: (b.adults||0)+(b.children||0) }; };
+    res.json({ date: today, checkIns: bks.filter(b => b.check_in === today && (b.booking_status === 'confirmed' || b.booking_status === 'checked-in')).map(enrich), checkOuts: bks.filter(b => b.check_out === today && b.booking_status === 'checked-in').map(enrich), pendingPayments: bks.filter(b => b.pending_amount > 0).map(enrich), cleaningRequired: [...new Set(bks.filter(b => b.check_out === today || b.check_in === tomorrow).map(b => (props.find(p => p.id === b.property_id)||{}).name))].filter(Boolean).map(n => ({ property_name: n })), maintenanceFlags: [] });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 app.post('/api/reports/daily-brief/send', (req, res) => {
@@ -1375,9 +1387,11 @@ app.get('/', (req, res) => {
 
         if (booksRes.status === 'fulfilled' && booksRes.value.ok) {
           const data = await booksRes.value.json();
-          const count = Array.isArray(data) ? data.length : (data.bookings ? data.bookings.length : 0);
-          document.getElementById('bookCount').textContent = count;
-          document.getElementById('bookBadge').textContent = count > 0 ? 'Active' : 'None';
+          const allBookings = Array.isArray(data) ? data : (data.bookings || []);
+          const activeCount = allBookings.filter(b => b.booking_status === 'confirmed' || b.booking_status === 'checked-in').length;
+          const totalCount = allBookings.length;
+          document.getElementById('bookCount').textContent = totalCount;
+          document.getElementById('bookBadge').textContent = activeCount > 0 ? activeCount + ' Active' : 'None active';
         } else {
           document.getElementById('bookCount').textContent = '0';
           document.getElementById('bookBadge').textContent = '--';
@@ -1415,26 +1429,28 @@ app.get('/', (req, res) => {
 
           const checkinList = document.getElementById('checkinList');
           if (checkins.length > 0) {
-            checkinList.innerHTML = checkins.map(b =>
-              '<div class="activity-item">' +
+            checkinList.innerHTML = checkins.map(b => {
+              const gName = b.guest_name || ((b.first_name || '') + ' ' + (b.last_name || '')).trim() || 'Guest';
+              return '<div class="activity-item">' +
                 '<span class="activity-dot checkin"></span>' +
-                '<span class="activity-text">' + (b.guest_name || b.guestName || 'Guest') + ' - ' + (b.property_name || b.propertyName || 'Property') + '</span>' +
+                '<span class="activity-text">' + gName + ' - ' + (b.property_name || b.propertyName || 'Property') + '</span>' +
                 '<span class="activity-time">' + (b.check_in_time || '4:00 PM') + '</span>' +
-              '</div>'
-            ).join('');
+              '</div>';
+            }).join('');
           } else {
             checkinList.innerHTML = '<div class="activity-empty">No check-ins scheduled for today</div>';
           }
 
           const checkoutList = document.getElementById('checkoutList');
           if (checkouts.length > 0) {
-            checkoutList.innerHTML = checkouts.map(b =>
-              '<div class="activity-item">' +
+            checkoutList.innerHTML = checkouts.map(b => {
+              const gName = b.guest_name || ((b.first_name || '') + ' ' + (b.last_name || '')).trim() || 'Guest';
+              return '<div class="activity-item">' +
                 '<span class="activity-dot checkout"></span>' +
-                '<span class="activity-text">' + (b.guest_name || b.guestName || 'Guest') + ' - ' + (b.property_name || b.propertyName || 'Property') + '</span>' +
+                '<span class="activity-text">' + gName + ' - ' + (b.property_name || b.propertyName || 'Property') + '</span>' +
                 '<span class="activity-time">' + (b.check_out_time || '2:00 PM') + '</span>' +
-              '</div>'
-            ).join('');
+              '</div>';
+            }).join('');
           } else {
             checkoutList.innerHTML = '<div class="activity-empty">No check-outs scheduled for today</div>';
           }

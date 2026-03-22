@@ -118,6 +118,33 @@ const query = async (text, params = []) => {
 
     // ---- PROPERTIES ----
     if (sql.includes('from properties') && sql.includes('select') && !sql.includes('insert') && !sql.includes('update')) {
+      // P&L / Revenue report query (joins with bookings, has date range)
+      if (sql.includes('join bookings') || sql.includes('left join bookings')) {
+        const active = store.properties.filter(pr => pr.is_active !== false);
+        // Extract date range from SQL
+        const dateMatch = replaced.match(/check_in\s*>=\s*'(\d{4}-\d{2}-\d{2})'[\s\S]*?check_in\s*<=\s*'(\d{4}-\d{2}-\d{2})'/i);
+        const startDate = dateMatch ? dateMatch[1] : null;
+        const endDate = dateMatch ? dateMatch[2] : null;
+        const daysInMonth = endDate ? new Date(endDate).getDate() : 30;
+
+        const rows = active.map(pr => {
+          let bookings = store.bookings.filter(b => b.property_id === pr.id && b.booking_status !== 'cancelled');
+          if (startDate && endDate) bookings = bookings.filter(b => b.check_in >= startDate && b.check_in <= endDate);
+          const nightsSold = bookings.length;
+          const nightsAvailable = (pr.total_rooms || 1) * daysInMonth;
+          const occupancyPercent = nightsAvailable > 0 ? Math.round(nightsSold / nightsAvailable * 100 * 10) / 10 : 0;
+          return {
+            property_id: pr.id, property_name: pr.name, total_rooms: pr.total_rooms || 1,
+            nights_sold: nightsSold, nights_available: nightsAvailable, available_nights: nightsAvailable,
+            occupancy_percent: occupancyPercent, occupancy: occupancyPercent,
+            gross_revenue: bookings.reduce((s, b) => s + (b.gross_amount || 0), 0),
+            commission: bookings.reduce((s, b) => s + (b.commission_amount || 0), 0),
+            net_revenue: bookings.reduce((s, b) => s + (b.net_amount || 0), 0),
+            booked_nights: nightsSold, name: pr.name
+          };
+        });
+        return { rows, rowCount: rows.length };
+      }
       if (sql.includes('where') && sql.includes('id') && params.length > 0) {
         const prop = store.properties.find(pr => pr.id == p(0) && pr.is_active !== false);
         if (prop) {
@@ -179,23 +206,51 @@ const query = async (text, params = []) => {
 
     // ---- BOOKINGS ----
     if (sql.includes('from bookings') && sql.includes('select') && !sql.includes('insert')) {
+      const todayStr = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })).toISOString().split('T')[0];
+      const enrich = (b) => {
+        const prop = store.properties.find(pr => pr.id === b.property_id) || {};
+        const guest = store.guests.find(g => g.id === b.guest_id) || {};
+        return { ...b, property_name: prop.name, property_id: b.property_id, first_name: guest.first_name, last_name: guest.last_name, email: guest.email, phone: guest.phone, address: prop.address, google_maps_link: prop.google_maps_link, guest_name: `${guest.first_name || ''} ${guest.last_name || ''}`.trim(), guests: (b.adults||0) + (b.children||0) };
+      };
+
+      // Dashboard today stats (contains today_checkins/today_checkouts subqueries)
+      if (sql.includes('today_checkins') || sql.includes('today_checkouts')) {
+        const today_checkins = store.bookings.filter(b => b.check_in === todayStr && (b.booking_status === 'confirmed' || b.booking_status === 'checked-in')).length;
+        const today_checkouts = store.bookings.filter(b => b.check_out === todayStr && b.booking_status === 'checked-in').length;
+        const today_revenue = store.bookings.filter(b => b.check_in === todayStr && b.booking_status !== 'cancelled').reduce((s, b) => s + (b.net_amount || 0), 0);
+        return { rows: [{ today_checkins, today_checkouts, today_revenue }], rowCount: 1 };
+      }
+
       if (sql.includes('count(*)') || sql.includes('count(distinct')) {
         const count = store.bookings.filter(b => b.booking_status !== 'cancelled').length;
         return { rows: [{ count, total_bookings: count, cancelled_bookings: 0, total_gross: store.bookings.reduce((s,b) => s + b.gross_amount, 0), total_commission: store.bookings.reduce((s,b) => s + b.commission_amount, 0), total_net: store.bookings.reduce((s,b) => s + b.net_amount, 0), confirmed_bookings: count, unique_guests: new Set(store.bookings.map(b => b.guest_id)).size }], rowCount: 1 };
       }
-      // Today's bookings
-      if (sql.includes('check_in') && sql.includes('current_date') || (params.length > 0 && params[0] === new Date().toISOString().split('T')[0])) {
-        const todayStr = new Date().toISOString().split('T')[0];
-        const checkIns = store.bookings.filter(b => b.check_in === todayStr && b.booking_status !== 'cancelled');
-        const checkOuts = store.bookings.filter(b => b.check_out === todayStr && b.booking_status !== 'cancelled');
-        // Enrich with property and guest names
-        const enrich = (b) => {
-          const prop = store.properties.find(pr => pr.id === b.property_id) || {};
-          const guest = store.guests.find(g => g.id === b.guest_id) || {};
-          return { ...b, property_name: prop.name, first_name: guest.first_name, last_name: guest.last_name, phone: guest.phone, address: prop.address, google_maps_link: prop.google_maps_link, guests: (b.adults||0) + (b.children||0) };
-        };
+
+      // Check-outs for today (check_out = CURRENT_DATE AND booking_status = 'checked-in')
+      if (sql.includes('check_out') && (sql.includes('current_date') || sql.includes(`'${todayStr}'`)) && !sql.includes('check_in')) {
+        const checkOuts = store.bookings.filter(b => b.check_out === todayStr && b.booking_status === 'checked-in');
+        return { rows: checkOuts.map(enrich), rowCount: checkOuts.length };
+      }
+
+      // Currently staying guests (check_in <= today AND check_out > today AND checked-in)
+      if (sql.includes('check_in') && sql.includes('<=') && sql.includes('check_out') && sql.includes('>')) {
+        const staying = store.bookings.filter(b => b.check_in <= todayStr && b.check_out > todayStr && b.booking_status === 'checked-in');
+        return { rows: staying.map(enrich), rowCount: staying.length };
+      }
+
+      // Today's check-ins (check_in = CURRENT_DATE AND confirmed/checked-in)
+      if ((sql.includes('check_in') && sql.includes('current_date')) || (sql.includes('check_in') && sql.includes(`'${todayStr}'`) && !sql.includes('date_trunc') && !sql.includes('>='))) {
+        const checkIns = store.bookings.filter(b => b.check_in === todayStr && (b.booking_status === 'confirmed' || b.booking_status === 'checked-in'));
+        const checkOuts = store.bookings.filter(b => b.check_out === todayStr && b.booking_status === 'checked-in');
         return { rows: checkIns.map(enrich), rowCount: checkIns.length, _checkOuts: checkOuts.map(enrich) };
       }
+
+      // Upcoming bookings (check_in >= today AND confirmed)
+      if (sql.includes('check_in') && sql.includes('>=') && sql.includes('confirmed')) {
+        const upcoming = store.bookings.filter(b => b.check_in >= todayStr && b.booking_status === 'confirmed').sort((a, b) => a.check_in.localeCompare(b.check_in)).slice(0, 5);
+        return { rows: upcoming.map(enrich), rowCount: upcoming.length };
+      }
+
       // Single booking
       if (sql.includes('where') && sql.includes('.id') && params.length === 1) {
         const booking = store.bookings.find(b => b.id == p(0));
@@ -208,11 +263,7 @@ const query = async (text, params = []) => {
       }
       // All bookings with enrichment
       let bookings = [...store.bookings];
-      const enriched = bookings.map(b => {
-        const prop = store.properties.find(pr => pr.id === b.property_id) || {};
-        const guest = store.guests.find(g => g.id === b.guest_id) || {};
-        return { ...b, property_name: prop.name, first_name: guest.first_name, last_name: guest.last_name, email: guest.email, phone: guest.phone };
-      });
+      const enriched = bookings.map(b => enrich(b));
       return { rows: enriched, rowCount: enriched.length };
     }
     if (sql.includes('insert into bookings')) {

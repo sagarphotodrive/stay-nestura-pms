@@ -1082,6 +1082,10 @@ const Guests = () => {
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
+  const [selectedGuest, setSelectedGuest] = useState(null);
+  const [guestBookings, setGuestBookings] = useState([]);
+  const [guestPage, setGuestPage] = useState(1);
+  const GUESTS_PER_PAGE = 10;
   const emptyGForm = { first_name: '', last_name: '', email: '', phone: '', address: '', nationality: 'Indian', id_proof_type: 'Aadhaar', id_proof_number: '', notes: '' };
   const [gForm, setGForm] = useState(emptyGForm);
 
@@ -1096,6 +1100,16 @@ const Guests = () => {
 
   const openAdd = () => { setEditId(null); setGForm(emptyGForm); setShowForm(true); };
   const openEdit = (g) => { setEditId(g.id); setGForm({ first_name: g.first_name, last_name: g.last_name, email: g.email || '', phone: g.phone, address: g.address || '', nationality: g.nationality || 'Indian', id_proof_type: g.id_proof_type || 'Aadhaar', id_proof_number: g.id_proof_number || '', notes: g.notes || '' }); setShowForm(true); };
+
+  const viewGuestDetails = async (guest) => {
+    setSelectedGuest(guest);
+    try {
+      const res = await api.get('/bookings');
+      const allBookings = res.data.bookings || res.data || [];
+      const gb = allBookings.filter(b => b.guest_id === guest.id).sort((a, b) => b.check_in.localeCompare(a.check_in));
+      setGuestBookings(gb);
+    } catch (err) { setGuestBookings([]); }
+  };
 
   const handleGuest = async (e) => {
     e.preventDefault();
@@ -1170,8 +1184,8 @@ const Guests = () => {
             </tr>
           </thead>
           <tbody>
-            {guests.map(guest => (
-              <tr key={guest.id}>
+            {guests.slice((guestPage - 1) * GUESTS_PER_PAGE, guestPage * GUESTS_PER_PAGE).map(guest => (
+              <tr key={guest.id} onClick={() => viewGuestDetails(guest)} style={{ cursor: 'pointer' }}>
                 <td><div className="guest-avatar-sm">{guest.first_name?.[0]}{guest.last_name?.[0]}</div></td>
                 <td className="guest-td-name">{guest.first_name} {guest.last_name}</td>
                 <td className="guest-td-phone">{guest.phone || '-'}</td>
@@ -1180,12 +1194,63 @@ const Guests = () => {
                 <td style={{ textAlign: 'center' }}><span className="guest-stays-badge">{guest.total_stays || 0}</span></td>
                 <td style={{ textAlign: 'right' }} className="guest-td-value">₹{parseFloat(guest.lifetime_value || 0).toLocaleString()}</td>
                 <td className="guest-td-notes">{guest.notes || '-'}</td>
-                <td style={{ textAlign: 'center' }}><button className="btn-icon-sm" onClick={() => openEdit(guest)} title="Edit"><Edit3 size={14} /></button></td>
+                <td style={{ textAlign: 'center' }}><button className="btn-icon-sm" onClick={(e) => { e.stopPropagation(); openEdit(guest); }} title="Edit"><Edit3 size={14} /></button></td>
               </tr>
             ))}
           </tbody>
         </table>
+        {guests.length > GUESTS_PER_PAGE && (
+          <div className="pagination" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', padding: '16px 0' }}>
+            <button className="btn btn-sm btn-secondary" disabled={guestPage === 1} onClick={() => setGuestPage(guestPage - 1)}>Previous</button>
+            <span style={{ color: '#94a3b8', fontSize: '13px' }}>Page {guestPage} of {Math.ceil(guests.length / GUESTS_PER_PAGE)}</span>
+            <button className="btn btn-sm btn-secondary" disabled={guestPage >= Math.ceil(guests.length / GUESTS_PER_PAGE)} onClick={() => setGuestPage(guestPage + 1)}>Next</button>
+          </div>
+        )}
       </div>
+
+      {/* Guest Detail Modal with Booking History */}
+      {selectedGuest && (
+        <div className="modal-overlay" onClick={() => setSelectedGuest(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '700px' }}>
+            <div className="modal-header">
+              <h2>{selectedGuest.first_name} {selectedGuest.last_name}</h2>
+              <button className="modal-close" onClick={() => setSelectedGuest(null)}><X size={20}/></button>
+            </div>
+            <div style={{ padding: '16px 20px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '20px' }}>
+                <div><span style={{ color: '#94a3b8', fontSize: '12px' }}>Phone</span><div style={{ fontWeight: 500 }}>{selectedGuest.phone || '-'}</div></div>
+                <div><span style={{ color: '#94a3b8', fontSize: '12px' }}>Email</span><div style={{ fontWeight: 500 }}>{selectedGuest.email || '-'}</div></div>
+                <div><span style={{ color: '#94a3b8', fontSize: '12px' }}>Nationality</span><div style={{ fontWeight: 500 }}>{selectedGuest.nationality || '-'}</div></div>
+                <div><span style={{ color: '#94a3b8', fontSize: '12px' }}>Total Stays</span><div style={{ fontWeight: 500 }}>{selectedGuest.total_stays || 0}</div></div>
+                <div><span style={{ color: '#94a3b8', fontSize: '12px' }}>Lifetime Value</span><div style={{ fontWeight: 600, color: '#10b981' }}>₹{parseFloat(selectedGuest.lifetime_value || 0).toLocaleString()}</div></div>
+                {selectedGuest.notes && <div><span style={{ color: '#94a3b8', fontSize: '12px' }}>Notes</span><div style={{ fontWeight: 500 }}>{selectedGuest.notes}</div></div>}
+              </div>
+
+              <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '12px', borderTop: '1px solid #334155', paddingTop: '16px' }}>Booking History</h3>
+              {guestBookings.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '300px', overflowY: 'auto' }}>
+                  {guestBookings.map(b => (
+                    <div key={b.id} style={{ background: '#1e293b', borderRadius: '8px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '14px' }}>{b.property_name || 'Property'}</div>
+                        <div style={{ color: '#94a3b8', fontSize: '12px', marginTop: '2px' }}>
+                          {format(new Date(b.check_in), 'MMM dd')} → {format(new Date(b.check_out), 'MMM dd, yyyy')} | {b.channel || 'direct'}
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontWeight: 600, color: '#10b981' }}>₹{(b.net_amount || 0).toLocaleString()}</div>
+                        <span className={`status-badge ${b.booking_status}`} style={{ fontSize: '11px' }}>{b.booking_status}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ color: '#64748b', textAlign: 'center', padding: '20px 0' }}>No bookings found for this guest</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
