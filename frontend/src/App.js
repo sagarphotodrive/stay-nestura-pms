@@ -803,7 +803,7 @@ const Bookings = () => {
     if (filterDateFrom) filtered = filtered.filter(b => b.check_in >= filterDateFrom);
     if (filterDateTo) filtered = filtered.filter(b => b.check_out <= filterDateTo);
     if (hidePast) { const today = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })).toISOString().split('T')[0]; filtered = filtered.filter(b => b.check_out >= today); }
-    filtered.sort((a, b) => a.check_in < b.check_in ? 1 : a.check_in > b.check_in ? -1 : 0);
+    filtered.sort((a, b) => hidePast ? a.check_in.localeCompare(b.check_in) : b.check_in.localeCompare(a.check_in));
     setBookings(filtered);
   }, [filter, filterProperty, filterChannel, filterDateFrom, filterDateTo, hidePast, allBookings]);
 
