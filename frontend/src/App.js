@@ -253,8 +253,8 @@ const Dashboard = () => {
               stats.upcoming.map((booking) => (
                 <div key={booking.id} className="booking-item">
                   <div className="booking-info">
-                    <span className="booking-guest">{booking.first_name} {booking.last_name}</span>
-                    <span className="booking-property">{booking.property_name}</span>
+                    <span className="booking-guest">{booking.first_name || ''} {booking.last_name || ''}</span>
+                    <span className="booking-property">{booking.property_name || 'Unknown'}</span>
                   </div>
                   <div className="booking-date">
                     {format(new Date(booking.check_in), 'MMM dd')}
@@ -340,7 +340,7 @@ const Properties = () => {
       </div>
 
       {showForm && (
-        <div className="modal-overlay">
+        <div className="modal-overlay" onClick={() => setShowForm(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <div className="modal-header"><h2>{editId ? 'Edit Property' : 'Add New Property'}</h2><button className="modal-close" onClick={() => setShowForm(false)}><X size={20}/></button></div>
             <form onSubmit={handleSubmit} className="modal-form">
@@ -622,7 +622,7 @@ const MasterCalendar = () => {
 
       {/* Booking Detail Modal */}
       {selectedBooking && (
-        <div className="modal-overlay">
+        <div className="modal-overlay" onClick={() => setSelectedBooking(null)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Booking Details</h2>
@@ -655,7 +655,7 @@ const MasterCalendar = () => {
               </div>
               <div className="detail-row">
                 <span className="detail-label">Status</span>
-                <span className={`status-badge ${selectedBooking.booking_status}`}>{selectedBooking.booking_status.replace(/-/g, ' ')}</span>
+                <span className={`status-badge ${selectedBooking.booking_status}`}>{(selectedBooking.booking_status || '').replace(/-/g, ' ')}</span>
               </div>
               <div className="detail-row">
                 <span className="detail-label">Payment</span>
@@ -926,7 +926,7 @@ const Bookings = () => {
       </div>
 
       {showForm && (
-        <div className="modal-overlay">
+        <div className="modal-overlay" onClick={() => setShowForm(false)}>
           <div className="modal-content modal-large" onClick={e => e.stopPropagation()}>
             <div className="modal-header"><h2>{editId ? 'Edit Booking' : 'New Booking'}</h2><button className="modal-close" onClick={() => setShowForm(false)}><X size={20}/></button></div>
             <form onSubmit={handleBooking} className="modal-form">
@@ -1063,7 +1063,7 @@ const Bookings = () => {
             </div>
             <div className="booking-actions">
               <span className={`status-badge ${booking.booking_status}`}>
-                {booking.booking_status.replace(/-/g, ' ')}
+                {(booking.booking_status || '').replace(/-/g, ' ')}
               </span>
               <button className="btn btn-sm btn-edit" onClick={() => openEdit(booking)}><Edit3 size={14} /> Edit</button>
               {booking.booking_status !== 'cancelled' && (
@@ -1163,7 +1163,7 @@ const Guests = () => {
       </div>
 
       {showForm && (
-        <div className="modal-overlay">
+        <div className="modal-overlay" onClick={() => setShowForm(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <div className="modal-header"><h2>{editId ? 'Edit Guest' : 'Add Guest'}</h2><button className="modal-close" onClick={() => setShowForm(false)}><X size={20}/></button></div>
             <form onSubmit={handleGuest} className="modal-form">
@@ -1266,7 +1266,7 @@ const Guests = () => {
                       </div>
                       <div style={{ textAlign: 'right' }}>
                         <div style={{ fontWeight: 600, color: '#10b981' }}>₹{(b.net_amount || 0).toLocaleString()}</div>
-                        <span className={`status-badge ${b.booking_status}`} style={{ fontSize: '11px' }}>{b.booking_status.replace(/-/g, ' ')}</span>
+                        <span className={`status-badge ${b.booking_status}`} style={{ fontSize: '11px' }}>{(b.booking_status || '').replace(/-/g, ' ')}</span>
                       </div>
                     </div>
                   ))}
@@ -1385,7 +1385,7 @@ const Expenses = () => {
       </div>
 
       {showForm && (
-        <div className="modal-overlay">
+        <div className="modal-overlay" onClick={() => setShowForm(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <div className="modal-header"><h2>{editId ? 'Edit Expense' : 'Add Expense'}</h2><button className="modal-close" onClick={() => setShowForm(false)}><X size={20}/></button></div>
             <form onSubmit={handleExpense} className="modal-form">
@@ -1899,7 +1899,7 @@ const Reports = () => {
             <div className="card-header"><h3>Expense by Category</h3></div>
             <div className="card-content">
               {expSummary.byCategory?.map(cat => {
-                const maxCat = Math.max(...expSummary.byCategory.map(c => c.total));
+                const maxCat = expSummary.byCategory.length ? Math.max(...expSummary.byCategory.map(c => c.total)) : 1;
                 return (
                   <div key={cat.category} className="bar-chart-row">
                     <span className="bar-label">{cat.category}</span>

@@ -54,6 +54,13 @@ app.use('/api/auth', authRoutes);
 // ============ API ROUTES (MongoDB or In-Memory) ============
 let _idCounter = 500;
 const _nextId = () => ++_idCounter;
+const parseMonthYear = (query) => {
+  let year = parseInt(query.year) || new Date().getFullYear();
+  let month = parseInt(query.month) || new Date().getMonth() + 1;
+  if (month < 1) month = 1; if (month > 12) month = 12;
+  if (year < 2000) year = 2000; if (year > 2100) year = 2100;
+  return { year, month };
+};
 
 // useMongo flag — set after connectDB() resolves
 let useMongo = false;
@@ -205,8 +212,7 @@ app.get('/api/bookings/today', async (req, res) => {
 });
 app.get('/api/bookings/stats/overview', async (req, res) => {
   try {
-    const year = parseInt(req.query.year) || new Date().getFullYear();
-    const month = parseInt(req.query.month) || new Date().getMonth() + 1;
+    const { year, month } = parseMonthYear(req.query);
     const propFilter = req.query.property_id ? parseInt(req.query.property_id) : null;
     const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
     const endDate = new Date(year, month, 0).toISOString().split('T')[0];
@@ -228,7 +234,7 @@ app.get('/api/bookings/stats/overview', async (req, res) => {
       const co = new Date(Math.min(new Date(b.check_out), monthEnd));
       return s + Math.max(0, Math.ceil((co - ci) / 86400000));
     }, 0);
-    res.json({ summary: { total_bookings: bks.length, cancelled_bookings: cancelledBks.length, total_gross: bks.reduce((s,b) => s+b.gross_amount, 0), total_net: bks.reduce((s,b) => s+b.gross_amount, 0), confirmed_bookings: bks.length, unique_guests: new Set(bks.map(b => b.guest_id)).size }, occupancy: props.map(p => { const propBks = bks.filter(b => b.property_id === p.id); const nightsBooked = calcNights(propBks); const available = p.total_rooms * daysInMonth; return { property_id: p.id, property_name: p.name, total_nights_booked: nightsBooked, total_nights_available: available, occupancy_percent: Math.round(nightsBooked / Math.max(1, available) * 100) }; }) });
+    res.json({ summary: { total_bookings: bks.length, cancelled_bookings: cancelledBks.length, total_gross: bks.reduce((s,b) => s+b.gross_amount, 0), total_net: bks.reduce((s,b) => s+b.net_amount, 0), confirmed_bookings: bks.filter(b => b.booking_status === 'confirmed').length, unique_guests: new Set(bks.map(b => b.guest_id)).size }, occupancy: props.map(p => { const propBks = bks.filter(b => b.property_id === p.id); const nightsBooked = calcNights(propBks); const available = p.total_rooms * daysInMonth; return { property_id: p.id, property_name: p.name, total_nights_booked: nightsBooked, total_nights_available: available, occupancy_percent: Math.round(nightsBooked / Math.max(1, available) * 100) }; }) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 app.get('/api/bookings/:id', async (req, res) => {
@@ -273,7 +279,7 @@ app.get('/api/bookings', async (req, res) => {
 app.get('/api/bookings/check-availability', async (req, res) => {
   try {
     const { property_id, check_in, check_out, exclude_booking_id } = req.query;
-    if (!property_id || !check_in || !check_out) return res.json({ available: true, conflicts: [] });
+    if (!property_id || !check_in || !check_out) return res.status(400).json({ error: 'property_id, check_in, and check_out are required' });
     const excludeId = exclude_booking_id ? parseInt(exclude_booking_id) : null;
     let conflictBookings;
     if (useMongo) {
@@ -291,6 +297,8 @@ app.get('/api/bookings/check-availability', async (req, res) => {
 app.post('/api/bookings', async (req, res) => {
   try {
     const b = req.body;
+    if (!b.check_in || !b.check_out || !b.property_id) return res.status(400).json({ error: 'check_in, check_out and property_id are required' });
+    if (b.check_in >= b.check_out) return res.status(400).json({ error: 'check_out must be after check_in' });
     let guestId = b.guest_id ? parseInt(b.guest_id) : null;
     if (!guestId && (b.first_name || b.phone)) {
       const key = [(b.first_name||'').trim().toLowerCase(), (b.last_name||'').trim().toLowerCase(), (b.phone||'').trim(), (b.email||'').trim().toLowerCase()].join('|');
@@ -314,7 +322,7 @@ app.post('/api/bookings', async (req, res) => {
     }
     const nights = Math.max(1, Math.ceil((new Date(b.check_out) - new Date(b.check_in)) / 86400000));
     const subtotal = (b.nightly_rate || 0) * nights;
-    const gross = (b.gross_amount || subtotal + (b.cleaning_fee||0) + (b.service_fee||0) + (b.taxes||0));
+    const gross = (b.gross_amount != null ? b.gross_amount : subtotal + (b.cleaning_fee||0) + (b.service_fee||0) + (b.taxes||0));
     const bookingData = { property_id: parseInt(b.property_id), guest_id: guestId, channel: b.channel || 'direct', channel_booking_id: b.channel_booking_id, check_in: b.check_in, check_out: b.check_out, adults: b.adults || 1, children: b.children || 0, infants: b.infants || 0, nightly_rate: b.nightly_rate || 0, subtotal, cleaning_fee: b.cleaning_fee || 0, service_fee: b.service_fee || 0, taxes: b.taxes || 0, gross_amount: gross, commission_percent: 0, commission_amount: 0, net_amount: gross, currency: 'INR', payment_status: b.payment_status || 'pending', payment_method: b.payment_method, paid_amount: b.paid_amount || 0, pending_amount: gross - (b.paid_amount || 0), booking_status: 'confirmed', guest_message: b.guest_message || '', special_requests: b.special_requests || '', check_in_time: b.check_in_time || '4:00 PM', check_out_time: b.check_out_time || '2:00 PM', confirmed_at: new Date().toISOString() };
 
     let booking;
@@ -334,53 +342,69 @@ app.post('/api/bookings', async (req, res) => {
 });
 app.patch('/api/bookings/:id/status', async (req, res) => {
   try {
-    const update = { booking_status: req.body.status };
-    if (req.body.status === 'checked_in') update.actual_check_in = new Date().toISOString();
-    if (req.body.status === 'checked_out') update.actual_check_out = new Date().toISOString();
-    if (req.body.status === 'cancelled') { update.cancelled_at = new Date().toISOString(); update.cancellation_reason = req.body.cancellation_reason; }
+    const newStatus = req.body.status;
+    const validTransitions = {
+      'confirmed': ['checked-in', 'cancelled'],
+      'checked-in': ['checked-out', 'cancelled'],
+      'checked-out': [],
+      'cancelled': ['confirmed']
+    };
+    // Find current booking to validate transition
+    let current;
+    if (useMongo) { current = await Booking.findOne({ id: parseInt(req.params.id) }).lean(); }
+    else { current = store.bookings.find(bk => bk.id == req.params.id); }
+    if (!current) return res.status(404).json({ error: 'Not found' });
+    const allowed = validTransitions[current.booking_status] || [];
+    if (!allowed.includes(newStatus)) {
+      return res.status(400).json({ error: `Cannot change status from '${current.booking_status}' to '${newStatus}'` });
+    }
+    const update = { booking_status: newStatus };
+    if (newStatus === 'checked-in') update.actual_check_in = new Date().toISOString();
+    if (newStatus === 'checked-out') update.actual_check_out = new Date().toISOString();
+    if (newStatus === 'cancelled') { update.cancelled_at = new Date().toISOString(); update.cancellation_reason = req.body.cancellation_reason; }
     if (useMongo) {
       const b = await Booking.findOneAndUpdate({ id: parseInt(req.params.id) }, { $set: update }, { new: true }).lean();
-      if (!b) return res.status(404).json({ error: 'Not found' });
       return res.json(b);
     }
-    const b = store.bookings.find(bk => bk.id == req.params.id);
-    if (!b) return res.status(404).json({ error: 'Not found' });
-    Object.assign(b, update, { updated_at: new Date().toISOString() });
-    res.json(b);
+    Object.assign(current, update, { updated_at: new Date().toISOString() });
+    res.json(current);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 app.put('/api/bookings/:id', async (req, res) => {
   try {
+    const allowedFields = ['property_id','guest_id','channel','check_in','check_out','adults','children','infants','nightly_rate','subtotal','cleaning_fee','service_fee','taxes','gross_amount','commission_percent','commission_amount','net_amount','payment_status','payment_method','paid_amount','pending_amount','booking_status','guest_message','special_requests','check_in_time','check_out_time','first_name','last_name','phone','email'];
+    const updates = {};
+    for (const key of allowedFields) { if (req.body[key] !== undefined) updates[key] = req.body[key]; }
     if (useMongo) {
-      const b = await Booking.findOneAndUpdate({ id: parseInt(req.params.id) }, { $set: req.body }, { new: true }).lean();
+      const b = await Booking.findOneAndUpdate({ id: parseInt(req.params.id) }, { $set: updates }, { new: true }).lean();
       if (!b) return res.status(404).json({ error: 'Not found' });
       return res.json(b);
     }
     const b = store.bookings.find(bk => bk.id == req.params.id);
     if (!b) return res.status(404).json({ error: 'Not found' });
-    Object.assign(b, req.body, { updated_at: new Date().toISOString() });
+    Object.assign(b, updates, { updated_at: new Date().toISOString() });
     res.json(b);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 app.patch('/api/bookings/:id/payment', async (req, res) => {
   try {
-    const amount = parseFloat(req.body.amount) || 0;
+    const amount = parseFloat(req.body.amount);
+    if (isNaN(amount) || amount < 0) return res.status(400).json({ error: 'Invalid payment amount' });
     if (useMongo) {
       let b = await Booking.findOne({ id: parseInt(req.params.id) });
       if (!b) return res.status(404).json({ error: 'Not found' });
-      b.paid_amount = (b.paid_amount || 0) + amount;
-      b.pending_amount = (b.gross_amount || 0) - b.paid_amount;
-      b.payment_status = b.pending_amount <= 0 ? 'paid' : 'partial';
-      if (b.pending_amount < 0) b.pending_amount = 0;
+      b.paid_amount = Math.min((b.paid_amount || 0) + amount, b.gross_amount || 0);
+      b.pending_amount = Math.max(0, (b.gross_amount || 0) - b.paid_amount);
+      b.payment_status = b.pending_amount <= 0 ? 'paid' : (b.paid_amount > 0 ? 'partial' : 'pending');
       await b.save();
       return res.json(b.toObject());
     }
     const b = store.bookings.find(bk => bk.id == req.params.id);
     if (!b) return res.status(404).json({ error: 'Not found' });
-    b.paid_amount = (b.paid_amount || 0) + amount;
-    b.pending_amount = (b.gross_amount || 0) - b.paid_amount;
+    b.paid_amount = Math.min((b.paid_amount || 0) + amount, b.gross_amount || 0);
+    b.pending_amount = Math.max(0, (b.gross_amount || 0) - b.paid_amount);
     if (b.pending_amount <= 0) { b.pending_amount = 0; b.payment_status = 'paid'; }
-    else { b.payment_status = 'partial'; }
+    else { b.payment_status = b.paid_amount > 0 ? 'partial' : 'pending'; }
     b.updated_at = new Date().toISOString();
     res.json(b);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -421,7 +445,8 @@ app.get('/api/guests/search/query', async (req, res) => {
     const q = (req.query.q || '').toLowerCase();
     if (q.length < 2) return res.json([]);
     if (useMongo) {
-      const regex = new RegExp(q, 'i');
+      const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(escaped, 'i');
       return res.json(await Guest.find({ $or: [{ first_name: regex }, { last_name: regex }, { email: regex }, { phone: regex }] }).limit(10).lean());
     }
     const found = store.guests.filter(g => (g.first_name+' '+g.last_name+' '+g.email+' '+g.phone).toLowerCase().includes(q));
@@ -507,9 +532,20 @@ app.put('/api/guests/:id', async (req, res) => {
 });
 app.delete('/api/guests/:id', async (req, res) => {
   try {
-    if (useMongo) { await Guest.findOneAndDelete({ id: parseInt(req.params.id) }); return res.json({ message: 'Deleted' }); }
-    const idx = store.guests.findIndex(g => g.id == req.params.id);
-    if (idx >= 0) store.guests.splice(idx, 1);
+    const gid = parseInt(req.params.id);
+    // Check for linked bookings
+    const hasBookings = useMongo
+      ? await Booking.exists({ guest_id: gid })
+      : store.bookings.some(b => b.guest_id === gid);
+    if (hasBookings) return res.status(400).json({ error: 'Cannot delete guest with existing bookings' });
+    if (useMongo) {
+      const result = await Guest.findOneAndDelete({ id: gid });
+      if (!result) return res.status(404).json({ error: 'Guest not found' });
+      return res.json({ message: 'Deleted' });
+    }
+    const idx = store.guests.findIndex(g => g.id == gid);
+    if (idx < 0) return res.status(404).json({ error: 'Guest not found' });
+    store.guests.splice(idx, 1);
     res.json({ message: 'Deleted' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -517,8 +553,7 @@ app.delete('/api/guests/:id', async (req, res) => {
 // --- EXPENSES ---
 app.get('/api/expenses/summary', async (req, res) => {
   try {
-    const year = parseInt(req.query.year) || new Date().getFullYear();
-    const month = parseInt(req.query.month) || new Date().getMonth() + 1;
+    const { year, month } = parseMonthYear(req.query);
     const propFilter = req.query.property_id ? parseInt(req.query.property_id) : null;
     const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
     const endDate = new Date(year, month, 0).toISOString().split('T')[0];
@@ -575,7 +610,8 @@ app.post('/api/expenses', async (req, res) => {
 });
 app.post('/api/expenses/bulk', async (req, res) => {
   try {
-    const items = req.body.expenses || [];
+    const items = Array.isArray(req.body.expenses) ? req.body.expenses : [];
+    if (items.length === 0) return res.status(400).json({ error: 'No expenses provided' });
     if (useMongo) {
       const docs = [];
       for (const b of items) { const eid = await nextId('expenses'); docs.push({ id: eid, ...b }); }
@@ -595,7 +631,7 @@ app.put('/api/expenses/:id', async (req, res) => {
     }
     const e = store.expenses.find(ex => ex.id == req.params.id);
     if (!e) return res.status(404).json({ error: 'Not found' });
-    Object.assign(e, req.body); res.json(e);
+    Object.assign(e, req.body, { updated_at: new Date().toISOString() }); res.json(e);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 app.delete('/api/expenses/:id', async (req, res) => {
@@ -643,8 +679,7 @@ app.get('/api/reports/dashboard', async (req, res) => {
 });
 app.get('/api/reports/profit-loss', async (req, res) => {
   try {
-    const year = parseInt(req.query.year) || new Date().getFullYear();
-    const month = parseInt(req.query.month) || new Date().getMonth() + 1;
+    const { year, month } = parseMonthYear(req.query);
     const propFilter = req.query.property_id ? parseInt(req.query.property_id) : null;
     const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
     const endDate = new Date(year, month, 0).toISOString().split('T')[0];
@@ -693,8 +728,7 @@ app.post('/api/reports/daily-brief/send', (req, res) => {
 });
 app.get('/api/reports/revenue', async (req, res) => {
   try {
-    const year = parseInt(req.query.year) || new Date().getFullYear();
-    const month = parseInt(req.query.month) || new Date().getMonth() + 1;
+    const { year, month } = parseMonthYear(req.query);
     const propFilter = req.query.property_id ? parseInt(req.query.property_id) : null;
     const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
     const endDate = new Date(year, month, 0).toISOString().split('T')[0];
@@ -702,7 +736,7 @@ app.get('/api/reports/revenue', async (req, res) => {
     let bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.check_in >= startDate && b.check_in <= endDate);
     if (propFilter) bks = bks.filter(b => b.property_id === propFilter);
     const props = useMongo ? await Property.find().lean() : store.properties;
-    const byChannel = {}; bks.forEach(b => { if (!byChannel[b.channel]) byChannel[b.channel] = { channel: b.channel, bookings: 0, gross: 0, net: 0 }; byChannel[b.channel].bookings++; byChannel[b.channel].gross += b.gross_amount; byChannel[b.channel].net += b.gross_amount; });
+    const byChannel = {}; bks.forEach(b => { if (!byChannel[b.channel]) byChannel[b.channel] = { channel: b.channel, bookings: 0, gross: 0, net: 0 }; byChannel[b.channel].bookings++; byChannel[b.channel].gross += b.gross_amount; byChannel[b.channel].net += b.net_amount; });
     const byMonth = {}; bks.forEach(b => { const m = b.check_in.substring(0,7); if (!byMonth[m]) byMonth[m] = { month: m, bookings: 0, gross: 0, net: 0 }; byMonth[m].bookings++; byMonth[m].gross += b.gross_amount; byMonth[m].net += b.net_amount; });
     const byProperty = {}; bks.forEach(b => { const pn = (props.find(p => p.id === b.property_id)||{}).name || 'Unknown'; if (!byProperty[pn]) byProperty[pn] = { property_name: pn, bookings: 0, gross: 0, net: 0 }; byProperty[pn].bookings++; byProperty[pn].gross += b.gross_amount; byProperty[pn].net += b.net_amount; });
     res.json({ byChannel: Object.values(byChannel), byMonth: Object.values(byMonth), byProperty: Object.values(byProperty) });
@@ -712,8 +746,7 @@ app.get('/api/reports/revenue', async (req, res) => {
 // --- REPORT EXTRAS ---
 app.get('/api/reports/guest-analytics', async (req, res) => {
   try {
-    const year = parseInt(req.query.year) || new Date().getFullYear();
-    const month = parseInt(req.query.month) || new Date().getMonth() + 1;
+    const { year, month } = parseMonthYear(req.query);
     const propFilter = req.query.property_id ? parseInt(req.query.property_id) : null;
     const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
     const endDate = new Date(year, month, 0).toISOString().split('T')[0];
@@ -731,8 +764,7 @@ app.get('/api/reports/guest-analytics', async (req, res) => {
 });
 app.get('/api/reports/payment-summary', async (req, res) => {
   try {
-    const year = parseInt(req.query.year) || new Date().getFullYear();
-    const month = parseInt(req.query.month) || new Date().getMonth() + 1;
+    const { year, month } = parseMonthYear(req.query);
     const propFilter = req.query.property_id ? parseInt(req.query.property_id) : null;
     const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
     const endDate = new Date(year, month, 0).toISOString().split('T')[0];
@@ -753,8 +785,7 @@ app.get('/api/reports/payment-summary', async (req, res) => {
 });
 app.get('/api/reports/adr', async (req, res) => {
   try {
-    const year = parseInt(req.query.year) || new Date().getFullYear();
-    const month = parseInt(req.query.month) || new Date().getMonth() + 1;
+    const { year, month } = parseMonthYear(req.query);
     const propFilter = req.query.property_id ? parseInt(req.query.property_id) : null;
     const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
     const endDate = new Date(year, month, 0).toISOString().split('T')[0];
