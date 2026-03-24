@@ -461,14 +461,22 @@ const copyBookingMessage = (b, prop) => {
   });
 };
 
-const PROPERTY_COLORS = [
-  { bg: 'rgba(99, 102, 241, 0.20)', border: 'rgba(99, 102, 241, 0.15)', badge: '#6366f1' },   // Indigo - Torna
-  { bg: 'rgba(245, 158, 11, 0.20)', border: 'rgba(245, 158, 11, 0.15)', badge: '#f59e0b' },    // Amber - Shivneri
-  { bg: 'rgba(16, 185, 129, 0.20)', border: 'rgba(16, 185, 129, 0.15)', badge: '#10b981' },    // Emerald - Solapur 2
-  { bg: 'rgba(236, 72, 153, 0.20)', border: 'rgba(236, 72, 153, 0.15)', badge: '#ec4899' },    // Pink - Solapur 1
-  { bg: 'rgba(14, 165, 233, 0.20)', border: 'rgba(14, 165, 233, 0.15)', badge: '#0ea5e9' },    // Sky - Single Room
-  { bg: 'rgba(168, 85, 247, 0.20)', border: 'rgba(168, 85, 247, 0.15)', badge: '#a855f7' },    // Purple - Deluxe
-];
+const PROPERTY_COLOR_MAP = {
+  'torna':     { bg: 'rgba(16, 185, 129, 0.20)', border: 'rgba(16, 185, 129, 0.15)', badge: '#10b981' },    // Green
+  'shivneri':  { bg: 'rgba(245, 158, 11, 0.20)', border: 'rgba(245, 158, 11, 0.15)', badge: '#f59e0b' },    // Orange
+  'homestay 1':{ bg: 'rgba(59, 130, 246, 0.20)', border: 'rgba(59, 130, 246, 0.15)', badge: '#3b82f6' },    // Blue (1BHK)
+  'homestay 2':{ bg: 'rgba(239, 68, 68, 0.20)',  border: 'rgba(239, 68, 68, 0.15)',  badge: '#ef4444' },    // Red (Rajlaxmi)
+  'single':    { bg: 'rgba(236, 72, 153, 0.20)', border: 'rgba(236, 72, 153, 0.15)', badge: '#ec4899' },    // Pink (SR1)
+  'deluxe':    { bg: 'rgba(168, 85, 247, 0.20)', border: 'rgba(168, 85, 247, 0.15)', badge: '#a855f7' },    // Purple (SR2)
+};
+const DEFAULT_COLOR = { bg: 'rgba(148, 163, 184, 0.20)', border: 'rgba(148, 163, 184, 0.15)', badge: '#94a3b8' };
+const getPropertyColor = (name) => {
+  const n = (name || '').toLowerCase();
+  for (const [key, color] of Object.entries(PROPERTY_COLOR_MAP)) {
+    if (n.includes(key)) return color;
+  }
+  return DEFAULT_COLOR;
+};
 
 const MasterCalendar = () => {
   const [properties, setProperties] = useState([]);
@@ -558,7 +566,7 @@ const MasterCalendar = () => {
 
         <div className="calendar-body">
           {properties.map((property, propIdx) => {
-            const color = PROPERTY_COLORS[propIdx % PROPERTY_COLORS.length];
+            const color = getPropertyColor(property.name);
             return (
             <div key={property.id} className="calendar-row">
               <div className="property-col" style={{ borderLeft: `4px solid ${color.badge}` }}>{property.name}</div>
