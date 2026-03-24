@@ -616,7 +616,8 @@ app.get('/api/reports/dashboard', async (req, res) => {
     const props = useMongo ? await Property.find({ is_active: true }).lean() : store.properties.filter(p => p.is_active);
     const guests = useMongo ? await Guest.find().lean() : store.guests;
     const monthStart = today.substring(0, 7) + '-01';
-    const monthBks = bks.filter(b => b.check_in >= monthStart && b.check_in <= today);
+    const monthEnd = new Date(parseInt(today.substring(0, 4)), parseInt(today.substring(5, 7)), 0).toISOString().split('T')[0];
+    const monthBks = bks.filter(b => b.check_in >= monthStart && b.check_in <= monthEnd);
     res.json({
       today: {
         today_checkins: bks.filter(b => b.check_in === today && (b.booking_status === 'confirmed' || b.booking_status === 'checked-in')).length,
@@ -624,7 +625,18 @@ app.get('/api/reports/dashboard', async (req, res) => {
         today_revenue: bks.filter(b => b.check_in === today).reduce((s,b) => s+b.net_amount, 0)
       },
       month: { total_bookings: monthBks.length, gross_revenue: monthBks.reduce((s,b) => s+b.gross_amount, 0), net_revenue: monthBks.reduce((s,b) => s+b.net_amount, 0) },
-      occupancy: props.map(p => { const pb = bks.filter(b => b.property_id === p.id && b.check_in <= today && b.check_out > today); return { name: p.name, booked_nights: pb.length, available_nights: p.total_rooms * 30, occupancy: Math.round(pb.length / Math.max(1, p.total_rooms * 30) * 100) }; }),
+      occupancy: props.map(p => {
+        const daysInMonth = new Date(parseInt(today.substring(0, 4)), parseInt(today.substring(5, 7)), 0).getDate();
+        const pb = monthBks.filter(b => b.property_id === p.id);
+        const nightsSold = pb.reduce((s, b) => {
+          const ci = new Date(Math.max(new Date(b.check_in), new Date(monthStart)));
+          const coLimit = new Date(parseInt(today.substring(0, 4)), parseInt(today.substring(5, 7)), 1);
+          const co = new Date(Math.min(new Date(b.check_out), coLimit));
+          return s + Math.max(0, Math.ceil((co - ci) / 86400000));
+        }, 0);
+        const availableNights = p.total_rooms * daysInMonth;
+        return { name: p.name, booked_nights: nightsSold, available_nights: availableNights, occupancy: Math.round(nightsSold / Math.max(1, availableNights) * 100) };
+      }),
       upcoming: bks.filter(b => b.check_in >= today && b.booking_status === 'confirmed').sort((a,b) => a.check_in.localeCompare(b.check_in)).slice(0, 5).map(b => { const p = props.find(pr => pr.id === b.property_id) || {}; const g = guests.find(gs => gs.id === b.guest_id) || {}; return { id: b.id, check_in: b.check_in, check_out: b.check_out, property_name: p.name, first_name: g.first_name, last_name: g.last_name }; })
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
