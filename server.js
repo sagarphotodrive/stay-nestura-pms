@@ -764,16 +764,24 @@ app.get('/api/reports/adr', async (req, res) => {
 });
 
 // --- ICAL EXPORT (generate .ics feed for a property) ---
+const toPropertySlug = (name) => name.toLowerCase().replace(/\s+by\s+stay\s+nestura/i, '').trim().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '');
+
 app.get('/api/properties/:id/ical.ics', async (req, res) => {
   try {
-    const propId = parseInt(req.params.id);
+    const param = req.params.id;
+    const isNumeric = /^\d+$/.test(param);
     let prop, bookingsList;
     if (useMongo) {
-      prop = await Property.findOne({ id: propId }).lean();
-      bookingsList = await Booking.find({ property_id: propId, booking_status: { $nin: ['cancelled'] } }).lean();
+      if (isNumeric) {
+        prop = await Property.findOne({ id: parseInt(param) }).lean();
+      } else {
+        const allProps = await Property.find().lean();
+        prop = allProps.find(p => toPropertySlug(p.name) === param);
+      }
+      if (prop) bookingsList = await Booking.find({ property_id: prop.id, booking_status: { $nin: ['cancelled'] } }).lean();
     } else {
-      prop = store.properties.find(p => p.id === propId);
-      bookingsList = (store.bookings || []).filter(b => b.property_id === propId && b.booking_status !== 'cancelled');
+      prop = isNumeric ? store.properties.find(p => p.id === parseInt(param)) : store.properties.find(p => toPropertySlug(p.name) === param);
+      bookingsList = prop ? (store.bookings || []).filter(b => b.property_id === prop.id && b.booking_status !== 'cancelled') : [];
     }
     if (!prop) return res.status(404).send('Property not found');
 

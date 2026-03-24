@@ -681,7 +681,8 @@ const MasterCalendar = () => {
           <div className="ical-content">
             {properties.map(prop => {
               const propLinks = icalLinks.filter(l => l.property_id === prop.id);
-              const exportUrl = `${api.defaults.baseURL.replace('/api', '')}/api/properties/${prop.id}/ical.ics`;
+              const propSlug = prop.name.toLowerCase().replace(/\s+by\s+stay\s+nestura/i, '').trim().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '');
+              const exportUrl = `${window.location.origin}/api/properties/${propSlug}/ical.ics`;
               return (
                 <div key={prop.id} className="ical-property">
                   <h4>{prop.name}</h4>
