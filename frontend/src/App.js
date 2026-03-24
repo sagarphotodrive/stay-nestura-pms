@@ -876,6 +876,14 @@ const Bookings = () => {
 
   const handleBooking = async (e) => {
     e.preventDefault();
+    if (!bForm.check_in || !bForm.check_out || bForm.check_in >= bForm.check_out) {
+      alert('Check-out date must be after check-in date.');
+      return;
+    }
+    if (!bForm.property_id) {
+      alert('Please select a property.');
+      return;
+    }
     if (availabilityStatus && !availabilityStatus.available) {
       alert('Cannot save booking: dates conflict with an existing booking.\n\n' + availabilityStatus.conflicts.map(c => `• ${c.guest_name} (${c.check_in} to ${c.check_out})`).join('\n'));
       return;
@@ -891,7 +899,10 @@ const Bookings = () => {
       setEditId(null);
       setAvailabilityStatus(null);
       fetchBookings();
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      const msg = err.response?.data?.error || 'Failed to save booking';
+      alert(msg);
+    }
   };
 
   const updateStatus = async (id, status) => {
@@ -899,7 +910,8 @@ const Bookings = () => {
       await api.patch(`/bookings/${id}/status`, { status });
       fetchBookings();
     } catch (err) {
-      console.error(err);
+      const msg = err.response?.data?.error || 'Failed to update status';
+      alert(msg);
     }
   };
 
