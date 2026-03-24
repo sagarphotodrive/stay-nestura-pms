@@ -655,7 +655,7 @@ const MasterCalendar = () => {
               </div>
               <div className="detail-row">
                 <span className="detail-label">Status</span>
-                <span className={`status-badge ${selectedBooking.booking_status}`}>{selectedBooking.booking_status}</span>
+                <span className={`status-badge ${selectedBooking.booking_status}`}>{selectedBooking.booking_status.replace(/-/g, ' ')}</span>
               </div>
               <div className="detail-row">
                 <span className="detail-label">Payment</span>
@@ -802,6 +802,15 @@ const Bookings = () => {
   useEffect(() => {
     fetchBookings();
   }, []);
+
+  // Auto-open booking edit when view param is set
+  useEffect(() => {
+    const viewId = searchParams.get('view');
+    if (viewId && allBookings.length > 0) {
+      const booking = allBookings.find(b => String(b.id) === viewId);
+      if (booking) { openEdit(booking); setSearchParams({}, { replace: true }); }
+    }
+  }, [allBookings]);
 
   useEffect(() => {
     // Apply all filters client-side
@@ -1054,7 +1063,7 @@ const Bookings = () => {
             </div>
             <div className="booking-actions">
               <span className={`status-badge ${booking.booking_status}`}>
-                {booking.booking_status}
+                {booking.booking_status.replace(/-/g, ' ')}
               </span>
               <button className="btn btn-sm btn-edit" onClick={() => openEdit(booking)}><Edit3 size={14} /> Edit</button>
               {booking.booking_status !== 'cancelled' && (
@@ -1098,6 +1107,7 @@ const Bookings = () => {
 // Guests Component
 const Guests = () => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [guests, setGuests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -1116,7 +1126,7 @@ const Guests = () => {
   }, []);
 
   const fetchGuests = async () => {
-    try { const params = search ? { search } : {}; const res = await api.get('/guests', { params }); setGuests(res.data.guests || []); } catch (err) { console.error(err); } finally { setLoading(false); }
+    try { const params = search ? { search, limit: 9999 } : { limit: 9999 }; const res = await api.get('/guests', { params }); setGuests(res.data.guests || []); } catch (err) { console.error(err); } finally { setLoading(false); }
   };
 
   const openAdd = () => { setEditId(null); setGForm(emptyGForm); setShowForm(true); };
@@ -1185,7 +1195,6 @@ const Guests = () => {
         </div>
         <div className="guest-summary">
           <span className="guest-count">{guests.length} guests</span>
-          <span className="guest-total-value">Total Lifetime: ₹{guests.reduce((s, g) => s + parseFloat(g.lifetime_value || 0), 0).toLocaleString()}</span>
         </div>
       </div>
 
@@ -1199,7 +1208,6 @@ const Guests = () => {
               <th>Email</th>
               <th>Nationality</th>
               <th style={{ textAlign: 'center' }}>Stays</th>
-              <th style={{ textAlign: 'right' }}>Lifetime Value</th>
               <th>Notes</th>
               <th style={{ textAlign: 'center' }}>Action</th>
             </tr>
@@ -1213,7 +1221,6 @@ const Guests = () => {
                 <td className="guest-td-email">{guest.email || '-'}</td>
                 <td>{guest.nationality || '-'}</td>
                 <td style={{ textAlign: 'center' }}><span className="guest-stays-badge">{guest.total_stays || 0}</span></td>
-                <td style={{ textAlign: 'right' }} className="guest-td-value">₹{parseFloat(guest.lifetime_value || 0).toLocaleString()}</td>
                 <td className="guest-td-notes">{guest.notes || '-'}</td>
                 <td style={{ textAlign: 'center' }}><button className="btn-icon-sm" onClick={(e) => { e.stopPropagation(); openEdit(guest); }} title="Edit"><Edit3 size={14} /></button></td>
               </tr>
@@ -1243,7 +1250,6 @@ const Guests = () => {
                 <div><span style={{ color: '#94a3b8', fontSize: '12px' }}>Email</span><div style={{ fontWeight: 500 }}>{selectedGuest.email || '-'}</div></div>
                 <div><span style={{ color: '#94a3b8', fontSize: '12px' }}>Nationality</span><div style={{ fontWeight: 500 }}>{selectedGuest.nationality || '-'}</div></div>
                 <div><span style={{ color: '#94a3b8', fontSize: '12px' }}>Total Stays</span><div style={{ fontWeight: 500 }}>{selectedGuest.total_stays || 0}</div></div>
-                <div><span style={{ color: '#94a3b8', fontSize: '12px' }}>Lifetime Value</span><div style={{ fontWeight: 600, color: '#10b981' }}>₹{parseFloat(selectedGuest.lifetime_value || 0).toLocaleString()}</div></div>
                 {selectedGuest.notes && <div><span style={{ color: '#94a3b8', fontSize: '12px' }}>Notes</span><div style={{ fontWeight: 500 }}>{selectedGuest.notes}</div></div>}
               </div>
 
@@ -1251,7 +1257,7 @@ const Guests = () => {
               {guestBookings.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '300px', overflowY: 'auto' }}>
                   {guestBookings.map(b => (
-                    <div key={b.id} style={{ background: '#1e293b', borderRadius: '8px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                    <div key={b.id} onClick={() => { setSelectedGuest(null); navigate(`/bookings?view=${b.id}`); }} style={{ background: '#1e293b', borderRadius: '8px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', cursor: 'pointer' }}>
                       <div>
                         <div style={{ fontWeight: 600, fontSize: '14px' }}>{b.property_name || 'Property'}</div>
                         <div style={{ color: '#94a3b8', fontSize: '12px', marginTop: '2px' }}>
@@ -1260,7 +1266,7 @@ const Guests = () => {
                       </div>
                       <div style={{ textAlign: 'right' }}>
                         <div style={{ fontWeight: 600, color: '#10b981' }}>₹{(b.net_amount || 0).toLocaleString()}</div>
-                        <span className={`status-badge ${b.booking_status}`} style={{ fontSize: '11px' }}>{b.booking_status}</span>
+                        <span className={`status-badge ${b.booking_status}`} style={{ fontSize: '11px' }}>{b.booking_status.replace(/-/g, ' ')}</span>
                       </div>
                     </div>
                   ))}

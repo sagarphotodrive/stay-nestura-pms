@@ -1857,12 +1857,8 @@ a:hover {
   border-color: var(--accent);
 }
 
-/* Status badge underscored display */
+/* Status badge display */
 .status-badge { text-transform: capitalize; }
-.status-badge.checked_out::before { content: 'checked out'; }
-.status-badge.checked_in::before { content: 'checked in'; }
-.status-badge.checked_out, .status-badge.checked_in { font-size: 0; }
-.status-badge.checked_out::before, .status-badge.checked_in::before { font-size: 0.75rem; }
 
 /* ====== EXPENSE TABLE ====== */
 .expense-summary-grid {
