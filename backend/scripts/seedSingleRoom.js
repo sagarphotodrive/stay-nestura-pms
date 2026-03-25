@@ -18,15 +18,15 @@ const newGuests = [
 
 const newBookings = [
   // Archana Rani: March 7-10 (3 nights), ₹5540
-  { id: 501, property_id: 5, guest_id: 501, channel: 'direct', check_in: '2026-03-07', check_out: '2026-03-10', adults: 1, nightly_rate: 1847, subtotal: 5540, gross_amount: 5540, net_amount: 5540, currency: 'INR', payment_status: 'paid', payment_method: 'UPI', paid_amount: 5540, pending_amount: 0, booking_status: 'checked_out' },
+  { id: 501, property_id: 5, guest_id: 501, channel: 'direct', check_in: '2026-03-07', check_out: '2026-03-10', adults: 1, nightly_rate: 1847, subtotal: 5540, gross_amount: 5540, net_amount: 5540, currency: 'INR', payment_status: 'paid', payment_method: 'UPI', paid_amount: 5540, pending_amount: 0, booking_status: 'checked-out' },
   // Sudheer Pooja: March 11-12 (1 night), ₹1500
-  { id: 502, property_id: 5, guest_id: 502, channel: 'direct', check_in: '2026-03-11', check_out: '2026-03-12', adults: 1, nightly_rate: 1500, subtotal: 1500, gross_amount: 1500, net_amount: 1500, currency: 'INR', payment_status: 'paid', payment_method: 'UPI', paid_amount: 1500, pending_amount: 0, booking_status: 'checked_out' },
+  { id: 502, property_id: 5, guest_id: 502, channel: 'direct', check_in: '2026-03-11', check_out: '2026-03-12', adults: 1, nightly_rate: 1500, subtotal: 1500, gross_amount: 1500, net_amount: 1500, currency: 'INR', payment_status: 'paid', payment_method: 'UPI', paid_amount: 1500, pending_amount: 0, booking_status: 'checked-out' },
   // Pradip: March 13-14 (1 night) - same Pradip Krishen (guest 301), no amount listed
-  { id: 503, property_id: 5, guest_id: 301, channel: 'direct', check_in: '2026-03-13', check_out: '2026-03-14', adults: 1, nightly_rate: 800, subtotal: 800, gross_amount: 800, net_amount: 800, currency: 'INR', payment_status: 'paid', payment_method: 'UPI', paid_amount: 800, pending_amount: 0, booking_status: 'checked_out', special_requests: 'Amount not in register' },
+  { id: 503, property_id: 5, guest_id: 301, channel: 'direct', check_in: '2026-03-13', check_out: '2026-03-14', adults: 1, nightly_rate: 800, subtotal: 800, gross_amount: 800, net_amount: 800, currency: 'INR', payment_status: 'paid', payment_method: 'UPI', paid_amount: 800, pending_amount: 0, booking_status: 'checked-out', special_requests: 'Amount not in register' },
   // Dhanlaxmi Limbad: March 15-16 (1 night), ₹1500
-  { id: 504, property_id: 5, guest_id: 503, channel: 'direct', check_in: '2026-03-15', check_out: '2026-03-16', adults: 1, nightly_rate: 1500, subtotal: 1500, gross_amount: 1500, net_amount: 1500, currency: 'INR', payment_status: 'paid', payment_method: 'UPI', paid_amount: 1500, pending_amount: 0, booking_status: 'checked_out' },
+  { id: 504, property_id: 5, guest_id: 503, channel: 'direct', check_in: '2026-03-15', check_out: '2026-03-16', adults: 1, nightly_rate: 1500, subtotal: 1500, gross_amount: 1500, net_amount: 1500, currency: 'INR', payment_status: 'paid', payment_method: 'UPI', paid_amount: 1500, pending_amount: 0, booking_status: 'checked-out' },
   // Shovon Mukherjee: March 16-19 (3 nights), ₹5000
-  { id: 505, property_id: 5, guest_id: 504, channel: 'direct', check_in: '2026-03-16', check_out: '2026-03-19', adults: 1, nightly_rate: 1667, subtotal: 5000, gross_amount: 5000, net_amount: 5000, currency: 'INR', payment_status: 'paid', payment_method: 'UPI', paid_amount: 5000, pending_amount: 0, booking_status: 'checked_out' },
+  { id: 505, property_id: 5, guest_id: 504, channel: 'direct', check_in: '2026-03-16', check_out: '2026-03-19', adults: 1, nightly_rate: 1667, subtotal: 5000, gross_amount: 5000, net_amount: 5000, currency: 'INR', payment_status: 'paid', payment_method: 'UPI', paid_amount: 5000, pending_amount: 0, booking_status: 'checked-out' },
 ];
 
 async function seed() {

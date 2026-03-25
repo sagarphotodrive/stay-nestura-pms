@@ -82,7 +82,7 @@ async function seed() {
     // Determine booking status based on checkout date
     const today = new Date('2026-03-19');
     const coDate = new Date(checkOut);
-    let bookingStatus = 'checked_out';
+    let bookingStatus = 'checked-out';
     if (coDate > today) bookingStatus = 'confirmed';
 
     return {
