@@ -342,11 +342,11 @@ app.post('/api/bookings', async (req, res) => {
 });
 app.patch('/api/bookings/:id/status', async (req, res) => {
   try {
-    const newStatus = req.body.status;
+    const newStatus = (req.body.status || '').replace(/_/g, '-');
     const validTransitions = {
       'confirmed': ['checked-in', 'cancelled'],
-      'checked-in': ['checked-out', 'cancelled'],
-      'checked-out': [],
+      'checked-in': ['checked-out', 'confirmed', 'cancelled'],
+      'checked-out': ['checked-in'],
       'cancelled': ['confirmed']
     };
     // Find current booking to validate transition

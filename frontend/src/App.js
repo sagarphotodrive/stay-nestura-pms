@@ -1276,9 +1276,9 @@ const Guests = () => {
           </tbody>
         </table>
         {guests.length > GUESTS_PER_PAGE && (
-          <div className="pagination" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', padding: '16px 0' }}>
-            <button className="btn btn-sm btn-secondary" disabled={guestPage === 1} onClick={() => setGuestPage(guestPage - 1)}>Previous</button>
-            <span style={{ color: '#94a3b8', fontSize: '13px' }}>Page {guestPage} of {Math.ceil(guests.length / GUESTS_PER_PAGE)}</span>
+          <div className="pagination">
+            <button className="btn btn-sm btn-secondary" disabled={guestPage === 1} onClick={() => setGuestPage(guestPage - 1)}>Prev</button>
+            <span className="pagination-text">Page {guestPage} of {Math.ceil(guests.length / GUESTS_PER_PAGE)}</span>
             <button className="btn btn-sm btn-secondary" disabled={guestPage >= Math.ceil(guests.length / GUESTS_PER_PAGE)} onClick={() => setGuestPage(guestPage + 1)}>Next</button>
           </div>
         )}
@@ -1287,40 +1287,40 @@ const Guests = () => {
       {/* Guest Detail Modal with Booking History */}
       {selectedGuest && (
         <div className="modal-overlay" onClick={() => setSelectedGuest(null)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '700px' }}>
+          <div className="modal-content modal-large" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>{selectedGuest.first_name} {selectedGuest.last_name}</h2>
               <button className="modal-close" onClick={() => setSelectedGuest(null)}><X size={20}/></button>
             </div>
-            <div style={{ padding: '16px 20px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '20px' }}>
-                <div><span style={{ color: '#94a3b8', fontSize: '12px' }}>Phone</span><div style={{ fontWeight: 500 }}>{selectedGuest.phone || '-'}</div></div>
-                <div><span style={{ color: '#94a3b8', fontSize: '12px' }}>Email</span><div style={{ fontWeight: 500 }}>{selectedGuest.email || '-'}</div></div>
-                <div><span style={{ color: '#94a3b8', fontSize: '12px' }}>Nationality</span><div style={{ fontWeight: 500 }}>{selectedGuest.nationality || '-'}</div></div>
-                <div><span style={{ color: '#94a3b8', fontSize: '12px' }}>Total Stays</span><div style={{ fontWeight: 500 }}>{selectedGuest.total_stays || 0}</div></div>
-                {selectedGuest.notes && <div><span style={{ color: '#94a3b8', fontSize: '12px' }}>Notes</span><div style={{ fontWeight: 500 }}>{selectedGuest.notes}</div></div>}
+            <div className="guest-detail-body">
+              <div className="guest-detail-grid">
+                <div><span className="detail-label-sm">Phone</span><div className="detail-value-sm">{selectedGuest.phone || '-'}</div></div>
+                <div><span className="detail-label-sm">Email</span><div className="detail-value-sm">{selectedGuest.email || '-'}</div></div>
+                <div><span className="detail-label-sm">Nationality</span><div className="detail-value-sm">{selectedGuest.nationality || '-'}</div></div>
+                <div><span className="detail-label-sm">Total Stays</span><div className="detail-value-sm">{selectedGuest.total_stays || 0}</div></div>
+                {selectedGuest.notes && <div><span className="detail-label-sm">Notes</span><div className="detail-value-sm">{selectedGuest.notes}</div></div>}
               </div>
 
-              <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '12px', borderTop: '1px solid #334155', paddingTop: '16px' }}>Booking History</h3>
+              <h3 className="guest-booking-history-title">Booking History</h3>
               {guestBookings.length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '300px', overflowY: 'auto' }}>
+                <div className="guest-booking-list">
                   {guestBookings.map(b => (
-                    <div key={b.id} onClick={() => { setSelectedGuest(null); navigate(`/bookings?view=${b.id}`); }} style={{ background: '#1e293b', borderRadius: '8px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', cursor: 'pointer' }}>
+                    <div key={b.id} onClick={() => { setSelectedGuest(null); navigate(`/bookings?view=${b.id}`); }} className="guest-booking-item">
                       <div>
-                        <div style={{ fontWeight: 600, fontSize: '14px' }}>{b.property_name || 'Property'}</div>
-                        <div style={{ color: '#94a3b8', fontSize: '12px', marginTop: '2px' }}>
+                        <div className="guest-booking-prop">{b.property_name || 'Property'}</div>
+                        <div className="guest-booking-dates">
                           {safeFormat(b.check_in, 'MMM dd')} → {safeFormat(b.check_out, 'MMM dd, yyyy')} | {b.channel || 'direct'}
                         </div>
                       </div>
                       <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontWeight: 600, color: '#10b981' }}>₹{(b.net_amount || 0).toLocaleString()}</div>
+                        <div className="guest-booking-amount">₹{(b.net_amount || 0).toLocaleString()}</div>
                         <span className={`status-badge ${b.booking_status}`} style={{ fontSize: '11px' }}>{(b.booking_status || '').replace(/-/g, ' ')}</span>
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <p style={{ color: '#64748b', textAlign: 'center', padding: '20px 0' }}>No bookings found for this guest</p>
+                <p className="empty-state">No bookings found for this guest</p>
               )}
             </div>
           </div>
@@ -1772,11 +1772,13 @@ const Reports = () => {
         </div>
       </div>
 
-      <div className="report-tabs" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+      <div className="report-tabs">
         {tabs.map(tab => (
           <button key={tab.id} className={`report-tab ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>{tab.label}</button>
         ))}
-        <button className="btn btn-sm btn-primary" onClick={() => downloadMap[activeTab]()} style={{ marginLeft: 'auto' }}><Download size={14} /> Download PDF</button>
+      </div>
+      <div style={{ marginBottom: '12px' }}>
+        <button className="btn btn-sm btn-primary" onClick={() => downloadMap[activeTab]()}><Download size={14} /> PDF</button>
       </div>
 
       {/* P&L Tab */}
