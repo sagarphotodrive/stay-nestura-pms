@@ -1015,13 +1015,13 @@ a:hover {
   border: 1px solid rgba(45, 138, 110, 0.2);
 }
 
-.status-badge.checked_in {
+.status-badge.checked-in {
   background: rgba(52, 115, 155, 0.1);
   color: var(--info);
   border: 1px solid rgba(52, 115, 155, 0.2);
 }
 
-.status-badge.checked_out {
+.status-badge.checked-out {
   background: rgba(107, 107, 107, 0.08);
   color: var(--text-secondary);
   border: 1px solid rgba(107, 107, 107, 0.15);

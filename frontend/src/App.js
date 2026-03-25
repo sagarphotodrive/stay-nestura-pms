@@ -2,7 +2,7 @@ import React, { useState, useEffect, createContext, useContext, useCallback } fr
 import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import axios from 'axios';
-import { format, addDays } from 'date-fns';
+import { format as fnsFormat, addDays } from 'date-fns';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import {
@@ -13,6 +13,13 @@ import {
   UserX, AlertCircle, CheckCircle, Clock, Link2, Trash2, ExternalLink, Edit3,
   Download, Upload, Copy
 } from 'lucide-react';
+
+const format = fnsFormat;
+const safeFormat = (dateStr, fmt) => {
+  if (!dateStr) return '-';
+  try { const d = new Date(dateStr + (dateStr.length === 10 ? 'T00:00:00' : '')); return isNaN(d.getTime()) ? '-' : fnsFormat(d, fmt); }
+  catch { return '-'; }
+};
 
 // API Configuration
 const API_URL = process.env.REACT_APP_API_URL || '/api';
@@ -188,6 +195,8 @@ const Dashboard = () => {
 
   if (loading) return <LoadingSpinner />;
 
+  const totalPending = (stats?.pending || []).reduce((s, p) => s + (p.pending_amount || 0), 0);
+
   return (
     <div className="dashboard">
       <div className="page-header">
@@ -209,37 +218,38 @@ const Dashboard = () => {
           color="#f59e0b"
         />
         <StatCard
-          title="Month Revenue"
-          value={`₹${(stats?.month?.net_revenue || 0).toLocaleString()}`}
-          icon={IndianRupee}
-          color="#3b82f6"
+          title="Currently Staying"
+          value={stats?.today?.currently_staying || 0}
+          icon={Users}
+          color="#8b5cf6"
         />
         <StatCard
-          title="Pending Payments"
-          value={stats?.pending?.length || 0}
-          icon={AlertCircle}
-          color="#ef4444"
+          title="This Month Revenue"
+          value={`₹${(stats?.month?.gross_revenue || 0).toLocaleString()}`}
+          icon={IndianRupee}
+          color="#3b82f6"
         />
       </div>
 
       <div className="dashboard-grid">
         <div className="card">
           <div className="card-header">
-            <h3>Occupancy Rate</h3>
+            <h3>This Month Occupancy</h3>
+            <span style={{ fontSize: '12px', color: '#94a3b8' }}>{stats?.month?.total_bookings || 0} bookings</span>
           </div>
           <div className="card-content">
-            {stats?.occupancy?.map((prop) => (
+            {stats?.occupancy?.length > 0 ? stats.occupancy.map((prop) => (
               <div key={prop.name} className="occupancy-item">
                 <span className="occupancy-name">{prop.name}</span>
                 <div className="occupancy-bar">
                   <div
                     className="occupancy-fill"
-                    style={{ width: `${prop.occupancy}%` }}
+                    style={{ width: `${Math.min(prop.occupancy, 100)}%` }}
                   />
                 </div>
                 <span className="occupancy-percent">{prop.occupancy}%</span>
               </div>
-            ))}
+            )) : <p className="empty-state">No properties found</p>}
           </div>
         </div>
 
@@ -257,7 +267,7 @@ const Dashboard = () => {
                     <span className="booking-property">{booking.property_name || 'Unknown'}</span>
                   </div>
                   <div className="booking-date">
-                    {format(new Date(booking.check_in), 'MMM dd')}
+                    {booking.check_in ? format(new Date(booking.check_in + 'T00:00:00'), 'MMM dd') : '-'}
                   </div>
                 </div>
               ))
@@ -267,6 +277,27 @@ const Dashboard = () => {
           </div>
         </div>
       </div>
+
+      {/* Pending Payments */}
+      {(stats?.pending?.length || 0) > 0 && (
+        <div className="card" style={{ marginTop: '20px' }}>
+          <div className="card-header">
+            <h3>Pending Payments</h3>
+            <span style={{ fontSize: '13px', fontWeight: 600, color: '#ef4444' }}>₹{totalPending.toLocaleString()} due</span>
+          </div>
+          <div className="card-content">
+            {stats.pending.map(p => (
+              <div key={p.id} className="booking-item">
+                <div className="booking-info">
+                  <span className="booking-guest">{p.guest_name}</span>
+                  <span className="booking-property">{p.property_name} | {p.check_in ? format(new Date(p.check_in + 'T00:00:00'), 'MMM dd') : ''}</span>
+                </div>
+                <div style={{ fontWeight: 600, color: '#ef4444', fontSize: '14px' }}>₹{(p.pending_amount || 0).toLocaleString()}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Quick Actions */}
       <div className="quick-actions">
@@ -280,7 +311,7 @@ const Dashboard = () => {
             <Calendar size={20} />
             <span>View Calendar</span>
           </Link>
-          <Link to="/guests" className="action-btn">
+          <Link to="/guests?action=new" className="action-btn">
             <Users size={20} />
             <span>Add Guest</span>
           </Link>
@@ -639,11 +670,11 @@ const MasterCalendar = () => {
               </div>
               <div className="detail-row">
                 <span className="detail-label">Check-in</span>
-                <span className="detail-value">{format(new Date(selectedBooking.check_in), 'MMM dd, yyyy')}</span>
+                <span className="detail-value">{safeFormat(selectedBooking.check_in, 'MMM dd, yyyy')}</span>
               </div>
               <div className="detail-row">
                 <span className="detail-label">Check-out</span>
-                <span className="detail-value">{format(new Date(selectedBooking.check_out), 'MMM dd, yyyy')}</span>
+                <span className="detail-value">{safeFormat(selectedBooking.check_out, 'MMM dd, yyyy')}</span>
               </div>
               <div className="detail-row">
                 <span className="detail-label">Channel</span>
@@ -774,6 +805,7 @@ const Bookings = () => {
   const [hidePast, setHidePast] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
   const [properties, setProperties] = useState([]);
   const [availabilityStatus, setAvailabilityStatus] = useState(null);
   const emptyBForm = { property_id: '', first_name: '', last_name: '', phone: '', email: '', check_in: '', check_out: '', adults: 1, children: 0, nightly_rate: '', channel: 'direct', payment_method: 'UPI', special_requests: '', advance_paid: 0 };
@@ -876,6 +908,7 @@ const Bookings = () => {
 
   const handleBooking = async (e) => {
     e.preventDefault();
+    if (submitting) return;
     if (!bForm.check_in || !bForm.check_out || bForm.check_in >= bForm.check_out) {
       alert('Check-out date must be after check-in date.');
       return;
@@ -888,6 +921,7 @@ const Bookings = () => {
       alert('Cannot save booking: dates conflict with an existing booking.\n\n' + availabilityStatus.conflicts.map(c => `• ${c.guest_name} (${c.check_in} to ${c.check_out})`).join('\n'));
       return;
     }
+    setSubmitting(true);
     try {
       const nights = Math.max(1, Math.ceil((new Date(bForm.check_out) - new Date(bForm.check_in)) / 86400000));
       const gross = parseFloat(bForm.nightly_rate) * nights;
@@ -902,6 +936,8 @@ const Bookings = () => {
     } catch (err) {
       const msg = err.response?.data?.error || 'Failed to save booking';
       alert(msg);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -990,7 +1026,7 @@ const Bookings = () => {
               <div className="form-group"><label>Special Requests</label><textarea value={bForm.special_requests} onChange={e => setBForm({...bForm, special_requests: e.target.value})} rows="2" placeholder="Any special requests..."/></div>
               <div className="form-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary" disabled={!editId && availabilityStatus && !availabilityStatus.available}>{editId ? 'Save Changes' : 'Create Booking'}</button>
+                <button type="submit" className="btn btn-primary" disabled={submitting || (!editId && availabilityStatus && !availabilityStatus.available)}>{submitting ? 'Saving...' : editId ? 'Save Changes' : 'Create Booking'}</button>
               </div>
             </form>
           </div>
@@ -1057,7 +1093,7 @@ const Bookings = () => {
                 <div className="date-range">
                   <span className="check-in">
                     <strong>Check-in</strong>
-                    {format(new Date(booking.check_in), 'MMM dd, yyyy')}
+                    {safeFormat(booking.check_in, 'MMM dd, yyyy')}
                   </span>
                   <ChevronRight size={16} />
                   <span className="check-out">
@@ -1067,9 +1103,9 @@ const Bookings = () => {
                 </div>
               </div>
               <div className="booking-amount">
-                <span className="amount">₹{parseFloat(booking.gross_amount || booking.net_amount).toLocaleString()}</span>
+                <span className="amount">₹{(parseFloat(booking.gross_amount || booking.net_amount) || 0).toLocaleString()}</span>
                 <span className="channel">{booking.channel === 'direct' ? 'Offline' : booking.channel}</span>
-                {booking.paid_amount > 0 && <span className="text-success" style={{fontSize:'12px'}}>Paid: ₹{parseFloat(booking.paid_amount).toLocaleString()}</span>}
+                {(booking.paid_amount || 0) > 0 && <span className="text-success" style={{fontSize:'12px'}}>Paid: ₹{(parseFloat(booking.paid_amount) || 0).toLocaleString()}</span>}
                 {(booking.pending_amount || 0) > 0 && <span className="text-danger" style={{fontSize:'12px'}}>Due: ₹{parseFloat(booking.pending_amount).toLocaleString()}</span>}
               </div>
             </div>
@@ -1132,7 +1168,7 @@ const Guests = () => {
   const emptyGForm = { first_name: '', last_name: '', email: '', phone: '', address: '', nationality: 'Indian', id_proof_type: 'Aadhaar', id_proof_number: '', notes: '' };
   const [gForm, setGForm] = useState(emptyGForm);
 
-  useEffect(() => { fetchGuests(); }, [search]);
+  useEffect(() => { fetchGuests(); setGuestPage(1); }, [search]);
   useEffect(() => {
     if (searchParams.get('action') === 'new') { openAdd(); setSearchParams({}, { replace: true }); }
   }, []);
@@ -1273,7 +1309,7 @@ const Guests = () => {
                       <div>
                         <div style={{ fontWeight: 600, fontSize: '14px' }}>{b.property_name || 'Property'}</div>
                         <div style={{ color: '#94a3b8', fontSize: '12px', marginTop: '2px' }}>
-                          {format(new Date(b.check_in), 'MMM dd')} → {format(new Date(b.check_out), 'MMM dd, yyyy')} | {b.channel || 'direct'}
+                          {safeFormat(b.check_in, 'MMM dd')} → {safeFormat(b.check_out, 'MMM dd, yyyy')} | {b.channel || 'direct'}
                         </div>
                       </div>
                       <div style={{ textAlign: 'right' }}>

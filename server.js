@@ -234,7 +234,7 @@ app.get('/api/bookings/stats/overview', async (req, res) => {
       const co = new Date(Math.min(new Date(b.check_out), monthEnd));
       return s + Math.max(0, Math.ceil((co - ci) / 86400000));
     }, 0);
-    res.json({ summary: { total_bookings: bks.length, cancelled_bookings: cancelledBks.length, total_gross: bks.reduce((s,b) => s+b.gross_amount, 0), total_net: bks.reduce((s,b) => s+b.net_amount, 0), confirmed_bookings: bks.filter(b => b.booking_status === 'confirmed').length, unique_guests: new Set(bks.map(b => b.guest_id)).size }, occupancy: props.map(p => { const propBks = bks.filter(b => b.property_id === p.id); const nightsBooked = calcNights(propBks); const available = p.total_rooms * daysInMonth; return { property_id: p.id, property_name: p.name, total_nights_booked: nightsBooked, total_nights_available: available, occupancy_percent: Math.round(nightsBooked / Math.max(1, available) * 100) }; }) });
+    res.json({ summary: { total_bookings: bks.length, cancelled_bookings: cancelledBks.length, total_gross: bks.reduce((s,b) => s+(b.gross_amount||0), 0), total_net: bks.reduce((s,b) => s+(b.net_amount||0), 0), confirmed_bookings: bks.filter(b => b.booking_status === 'confirmed').length, unique_guests: new Set(bks.map(b => b.guest_id)).size }, occupancy: props.map(p => { const propBks = bks.filter(b => b.property_id === p.id); const nightsBooked = calcNights(propBks); const available = p.total_rooms * daysInMonth; return { property_id: p.id, property_name: p.name, total_nights_booked: nightsBooked, total_nights_available: available, occupancy_percent: Math.round(nightsBooked / Math.max(1, available) * 100) }; }) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 app.get('/api/bookings/:id', async (req, res) => {
@@ -651,29 +651,55 @@ app.get('/api/reports/dashboard', async (req, res) => {
     const bks = allBks.filter(b => b.booking_status !== 'cancelled');
     const props = useMongo ? await Property.find({ is_active: true }).lean() : store.properties.filter(p => p.is_active);
     const guests = useMongo ? await Guest.find().lean() : store.guests;
+    const yr = parseInt(today.substring(0, 4)), mn = parseInt(today.substring(5, 7));
     const monthStart = today.substring(0, 7) + '-01';
-    const monthEnd = new Date(parseInt(today.substring(0, 4)), parseInt(today.substring(5, 7)), 0).toISOString().split('T')[0];
-    const monthBks = bks.filter(b => b.check_in >= monthStart && b.check_in <= monthEnd);
+    const monthEnd = new Date(yr, mn, 0).toISOString().split('T')[0];
+    const daysInMonth = new Date(yr, mn, 0).getDate();
+    // Month bookings: any booking that overlaps with this month (not just check_in within month)
+    const monthBks = bks.filter(b => b.check_out > monthStart && b.check_in <= monthEnd);
+
+    // Today's check-ins: confirmed bookings arriving today
+    const todayCheckins = bks.filter(b => b.check_in === today && (b.booking_status === 'confirmed' || b.booking_status === 'checked-in'));
+    // Today's check-outs: guests leaving today (checked-in or already checked-out today)
+    const todayCheckouts = bks.filter(b => b.check_out === today && (b.booking_status === 'checked-in' || b.booking_status === 'checked-out'));
+    // Currently staying: checked-in right now
+    const currentlyStaying = bks.filter(b => b.check_in <= today && b.check_out > today && (b.booking_status === 'confirmed' || b.booking_status === 'checked-in'));
+
+    // Pending payments: any non-cancelled booking with pending_amount > 0
+    const pending = bks.filter(b => (b.pending_amount || 0) > 0).map(b => {
+      const p = props.find(pr => pr.id === b.property_id) || {};
+      const g = guests.find(gs => gs.id === b.guest_id) || {};
+      return { id: b.id, guest_name: `${g.first_name || ''} ${g.last_name || ''}`.trim() || 'Guest', property_name: p.name || 'Unknown', pending_amount: b.pending_amount, check_in: b.check_in, check_out: b.check_out };
+    });
+
+    // Month revenue from bookings with check_in in this month (consistent with P&L)
+    const monthRevBks = bks.filter(b => b.check_in >= monthStart && b.check_in <= monthEnd);
+    const monthGross = monthRevBks.reduce((s, b) => s + (b.gross_amount || 0), 0);
+    const monthNet = monthRevBks.reduce((s, b) => s + (b.net_amount || 0), 0);
+
+    // Occupancy: nights sold this month per property
+    const occupancy = props.map(p => {
+      const pb = monthBks.filter(b => b.property_id === p.id);
+      const nightsSold = pb.reduce((s, b) => {
+        const ci = new Date(Math.max(new Date(b.check_in), new Date(monthStart)));
+        const co = new Date(Math.min(new Date(b.check_out), new Date(yr, mn, 1)));
+        return s + Math.max(0, Math.ceil((co - ci) / 86400000));
+      }, 0);
+      const availableNights = p.total_rooms * daysInMonth;
+      return { name: p.name, booked_nights: nightsSold, available_nights: availableNights, occupancy: Math.round(nightsSold / Math.max(1, availableNights) * 100) };
+    });
+
+    // Upcoming bookings
+    const upcoming = bks.filter(b => b.check_in >= today && b.booking_status === 'confirmed')
+      .sort((a, b) => a.check_in.localeCompare(b.check_in)).slice(0, 5)
+      .map(b => { const p = props.find(pr => pr.id === b.property_id) || {}; const g = guests.find(gs => gs.id === b.guest_id) || {}; return { id: b.id, check_in: b.check_in, check_out: b.check_out, property_name: p.name || 'Unknown', first_name: g.first_name || '', last_name: g.last_name || '' }; });
+
     res.json({
-      today: {
-        today_checkins: bks.filter(b => b.check_in === today && (b.booking_status === 'confirmed' || b.booking_status === 'checked-in')).length,
-        today_checkouts: bks.filter(b => b.check_out === today && b.booking_status === 'checked-in').length,
-        today_revenue: bks.filter(b => b.check_in === today).reduce((s,b) => s+b.net_amount, 0)
-      },
-      month: { total_bookings: monthBks.length, gross_revenue: monthBks.reduce((s,b) => s+b.gross_amount, 0), net_revenue: monthBks.reduce((s,b) => s+b.net_amount, 0) },
-      occupancy: props.map(p => {
-        const daysInMonth = new Date(parseInt(today.substring(0, 4)), parseInt(today.substring(5, 7)), 0).getDate();
-        const pb = monthBks.filter(b => b.property_id === p.id);
-        const nightsSold = pb.reduce((s, b) => {
-          const ci = new Date(Math.max(new Date(b.check_in), new Date(monthStart)));
-          const coLimit = new Date(parseInt(today.substring(0, 4)), parseInt(today.substring(5, 7)), 1);
-          const co = new Date(Math.min(new Date(b.check_out), coLimit));
-          return s + Math.max(0, Math.ceil((co - ci) / 86400000));
-        }, 0);
-        const availableNights = p.total_rooms * daysInMonth;
-        return { name: p.name, booked_nights: nightsSold, available_nights: availableNights, occupancy: Math.round(nightsSold / Math.max(1, availableNights) * 100) };
-      }),
-      upcoming: bks.filter(b => b.check_in >= today && b.booking_status === 'confirmed').sort((a,b) => a.check_in.localeCompare(b.check_in)).slice(0, 5).map(b => { const p = props.find(pr => pr.id === b.property_id) || {}; const g = guests.find(gs => gs.id === b.guest_id) || {}; return { id: b.id, check_in: b.check_in, check_out: b.check_out, property_name: p.name, first_name: g.first_name, last_name: g.last_name }; })
+      today: { today_checkins: todayCheckins.length, today_checkouts: todayCheckouts.length, currently_staying: currentlyStaying.length },
+      month: { total_bookings: monthRevBks.length, gross_revenue: monthGross, net_revenue: monthNet },
+      occupancy,
+      pending,
+      upcoming
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -701,8 +727,8 @@ app.get('/api/reports/profit-loss', async (req, res) => {
         const co = new Date(Math.min(new Date(b.check_out), new Date(year, month, 1)));
         return s + Math.max(0, Math.ceil((co - ci) / 86400000));
       }, 0);
-      const gross = pb.reduce((s,b) => s+b.gross_amount, 0);
-      const propExps = monthExps.filter(e => e.property_id === p.id).reduce((s,e) => s+e.amount, 0);
+      const gross = pb.reduce((s,b) => s+(b.gross_amount||0), 0);
+      const propExps = monthExps.filter(e => e.property_id === p.id).reduce((s,e) => s+(e.amount||0), 0);
       const exps = propExps + commonPerProp;
       const availableNights = p.total_rooms * daysInMonth;
       return { property_id: p.id, property_name: p.name, occupancy_percent: Math.round(nightsSold / Math.max(1, availableNights) * 100), nights_sold: nightsSold, available_nights: availableNights, gross_revenue: gross, expenses: exps, net_profit: gross - exps };
@@ -736,9 +762,9 @@ app.get('/api/reports/revenue', async (req, res) => {
     let bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.check_in >= startDate && b.check_in <= endDate);
     if (propFilter) bks = bks.filter(b => b.property_id === propFilter);
     const props = useMongo ? await Property.find().lean() : store.properties;
-    const byChannel = {}; bks.forEach(b => { if (!byChannel[b.channel]) byChannel[b.channel] = { channel: b.channel, bookings: 0, gross: 0, net: 0 }; byChannel[b.channel].bookings++; byChannel[b.channel].gross += b.gross_amount; byChannel[b.channel].net += b.net_amount; });
-    const byMonth = {}; bks.forEach(b => { const m = b.check_in.substring(0,7); if (!byMonth[m]) byMonth[m] = { month: m, bookings: 0, gross: 0, net: 0 }; byMonth[m].bookings++; byMonth[m].gross += b.gross_amount; byMonth[m].net += b.net_amount; });
-    const byProperty = {}; bks.forEach(b => { const pn = (props.find(p => p.id === b.property_id)||{}).name || 'Unknown'; if (!byProperty[pn]) byProperty[pn] = { property_name: pn, bookings: 0, gross: 0, net: 0 }; byProperty[pn].bookings++; byProperty[pn].gross += b.gross_amount; byProperty[pn].net += b.net_amount; });
+    const byChannel = {}; bks.forEach(b => { const ch = b.channel || 'unknown'; if (!byChannel[ch]) byChannel[ch] = { channel: ch, bookings: 0, gross: 0, net: 0 }; byChannel[ch].bookings++; byChannel[ch].gross += (b.gross_amount||0); byChannel[ch].net += (b.net_amount||0); });
+    const byMonth = {}; bks.forEach(b => { const m = (b.check_in||'').substring(0,7); if (!m) return; if (!byMonth[m]) byMonth[m] = { month: m, bookings: 0, gross: 0, net: 0 }; byMonth[m].bookings++; byMonth[m].gross += (b.gross_amount||0); byMonth[m].net += (b.net_amount||0); });
+    const byProperty = {}; bks.forEach(b => { const pn = (props.find(p => p.id === b.property_id)||{}).name || 'Unknown'; if (!byProperty[pn]) byProperty[pn] = { property_name: pn, bookings: 0, gross: 0, net: 0 }; byProperty[pn].bookings++; byProperty[pn].gross += (b.gross_amount||0); byProperty[pn].net += (b.net_amount||0); });
     res.json({ byChannel: Object.values(byChannel), byMonth: Object.values(byMonth), byProperty: Object.values(byProperty) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -775,11 +801,11 @@ app.get('/api/reports/payment-summary', async (req, res) => {
     const pending = bks.filter(b => b.payment_status === 'pending');
     const partial = bks.filter(b => b.payment_status === 'partial');
     res.json({
-      paid: { count: paid.length, total: paid.reduce((s,b) => s + b.gross_amount, 0) },
-      pending: { count: pending.length, total: pending.reduce((s,b) => s + b.gross_amount, 0) },
-      partial: { count: partial.length, total: partial.reduce((s,b) => s + b.gross_amount, 0), collected: partial.reduce((s,b) => s + b.paid_amount, 0), remaining: partial.reduce((s,b) => s + b.pending_amount, 0) },
-      total_collected: bks.reduce((s,b) => s + b.paid_amount, 0),
-      total_pending: bks.reduce((s,b) => s + b.pending_amount, 0)
+      paid: { count: paid.length, total: paid.reduce((s,b) => s + (b.gross_amount||0), 0) },
+      pending: { count: pending.length, total: pending.reduce((s,b) => s + (b.gross_amount||0), 0) },
+      partial: { count: partial.length, total: partial.reduce((s,b) => s + (b.gross_amount||0), 0), collected: partial.reduce((s,b) => s + (b.paid_amount||0), 0), remaining: partial.reduce((s,b) => s + (b.pending_amount||0), 0) },
+      total_collected: bks.reduce((s,b) => s + (b.paid_amount||0), 0),
+      total_pending: bks.reduce((s,b) => s + (b.pending_amount||0), 0)
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -796,7 +822,7 @@ app.get('/api/reports/adr', async (req, res) => {
     const filteredProps = propFilter ? activeProps.filter(p => p.id === propFilter) : activeProps;
     const props = filteredProps.map(p => {
       const pb = bks.filter(b => b.property_id === p.id);
-      const totalRevenue = pb.reduce((s,b) => s + b.net_amount, 0);
+      const totalRevenue = pb.reduce((s,b) => s + (b.net_amount||0), 0);
       const totalNights = pb.reduce((s,b) => s + Math.max(1, Math.ceil((new Date(b.check_out) - new Date(b.check_in)) / 86400000)), 0);
       return { property_id: p.id, property_name: p.name, total_revenue: totalRevenue, nights_sold: totalNights, adr: totalNights > 0 ? Math.round(totalRevenue / totalNights) : 0, base_price: p.base_price };
     });
