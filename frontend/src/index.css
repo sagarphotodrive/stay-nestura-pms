@@ -546,6 +546,83 @@ a:hover {
   color: var(--primary);
 }
 
+/* Financial Pacing Widget */
+.pacing-row {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.pacing-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pacing-label {
+  font-size: 11px;
+  color: var(--text-light);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.pacing-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.pacing-bar-container {
+  margin-top: 4px;
+}
+.pacing-bar-track {
+  position: relative;
+  height: 8px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  overflow: visible;
+}
+.pacing-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1, #10b981);
+  border-radius: 4px;
+  transition: width 0.6s ease;
+}
+.pacing-bar-marker {
+  position: absolute;
+  top: -4px;
+  width: 2px;
+  height: 16px;
+  background: var(--text-secondary);
+  border-radius: 1px;
+  transform: translateX(-1px);
+}
+.text-green { color: #10b981 !important; }
+
+/* Channel Split Bar */
+.channel-split-bar {
+  display: flex;
+  height: 32px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  color: white;
+}
+.channel-split-direct {
+  background: #10b981;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  transition: width 0.4s ease;
+}
+.channel-split-ota {
+  background: #f59e0b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  transition: width 0.4s ease;
+}
+
 /* Properties Grid */
 .properties-grid {
   display: grid;
@@ -1457,6 +1534,9 @@ a:hover {
   .stat-icon { width: 44px; height: 44px; min-width: 44px; border-radius: var(--radius-lg); }
   .stat-title { font-size: 0.75rem; }
   .stat-value { font-size: 1.35rem; }
+
+  .pacing-row { grid-template-columns: repeat(4, 1fr); }
+  .pacing-value { font-size: 18px; }
 
   .modal-overlay { align-items: center; padding: 20px; }
   .modal-content { max-width: 600px; border-radius: var(--radius-xl); max-height: 90vh; }

@@ -694,9 +694,25 @@ app.get('/api/reports/dashboard', async (req, res) => {
       .sort((a, b) => a.check_in.localeCompare(b.check_in)).slice(0, 5)
       .map(b => { const p = props.find(pr => pr.id === b.property_id) || {}; const g = guests.find(gs => gs.id === b.guest_id) || {}; return { id: b.id, check_in: b.check_in, check_out: b.check_out, property_name: p.name || 'Unknown', first_name: g.first_name || '', last_name: g.last_name || '' }; });
 
+    // Financial pacing: current month vs previous month
+    const prevMn = mn === 1 ? 12 : mn - 1;
+    const prevYr = mn === 1 ? yr - 1 : yr;
+    const prevStart = `${prevYr}-${String(prevMn).padStart(2,'0')}-01`;
+    const prevEnd = new Date(prevYr, prevMn, 0).toISOString().split('T')[0];
+    const prevMonthBks = bks.filter(b => b.check_in >= prevStart && b.check_in <= prevEnd);
+    const prevGross = prevMonthBks.reduce((s, b) => s + (b.gross_amount || 0), 0);
+    const dayOfMonth = parseInt(today.substring(8, 10));
+    const projected = dayOfMonth > 0 ? Math.round(monthGross / dayOfMonth * daysInMonth) : monthGross;
+    const delta = prevGross > 0 ? Math.round((monthGross - prevGross) / prevGross * 100) : (monthGross > 0 ? 100 : 0);
+
+    // Pending action count
+    const pendingActionCount = todayCheckins.length + todayCheckouts.length + pending.length;
+
     res.json({
       today: { today_checkins: todayCheckins.length, today_checkouts: todayCheckouts.length, currently_staying: currentlyStaying.length },
       month: { total_bookings: monthRevBks.length, gross_revenue: monthGross, net_revenue: monthNet },
+      pacing: { current_month: monthGross, prev_month: prevGross, delta_pct: delta, projected_month_end: projected, days_elapsed: dayOfMonth, days_in_month: daysInMonth },
+      pending_action_count: pendingActionCount,
       occupancy,
       pending,
       upcoming
@@ -766,6 +782,100 @@ app.get('/api/reports/revenue', async (req, res) => {
     const byMonth = {}; bks.forEach(b => { const m = (b.check_in||'').substring(0,7); if (!m) return; if (!byMonth[m]) byMonth[m] = { month: m, bookings: 0, gross: 0, net: 0 }; byMonth[m].bookings++; byMonth[m].gross += (b.gross_amount||0); byMonth[m].net += (b.net_amount||0); });
     const byProperty = {}; bks.forEach(b => { const pn = (props.find(p => p.id === b.property_id)||{}).name || 'Unknown'; if (!byProperty[pn]) byProperty[pn] = { property_name: pn, bookings: 0, gross: 0, net: 0 }; byProperty[pn].bookings++; byProperty[pn].gross += (b.gross_amount||0); byProperty[pn].net += (b.net_amount||0); });
     res.json({ byChannel: Object.values(byChannel), byMonth: Object.values(byMonth), byProperty: Object.values(byProperty) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// --- KPI METRICS (RevPAR, GOPPAR, ALOS, TRevPAR) ---
+app.get('/api/reports/kpi-metrics', async (req, res) => {
+  try {
+    const { year, month } = parseMonthYear(req.query);
+    const propFilter = req.query.property_id ? parseInt(req.query.property_id) : null;
+    const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
+    const endDate = new Date(year, month, 0).toISOString().split('T')[0];
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const allBks = useMongo ? await Booking.find().lean() : store.bookings;
+    let bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.check_in >= startDate && b.check_in <= endDate);
+    if (propFilter) bks = bks.filter(b => b.property_id === propFilter);
+    const allExps = useMongo ? await Expense.find().lean() : store.expenses;
+    let monthExps = allExps.filter(e => e.expense_date >= startDate && e.expense_date <= endDate);
+    if (propFilter) monthExps = monthExps.filter(e => e.property_id === propFilter || e.property_id === 0);
+    const activeProps = useMongo ? await Property.find({ is_active: true }).lean() : store.properties.filter(p => p.is_active);
+    const filteredProps = propFilter ? activeProps.filter(p => p.id === propFilter) : activeProps;
+    const totalRooms = filteredProps.reduce((s, p) => s + (p.total_rooms || 1), 0);
+    const totalAvailableNights = totalRooms * daysInMonth;
+    const totalGross = bks.reduce((s, b) => s + (b.gross_amount || 0), 0);
+    const totalExpenses = monthExps.reduce((s, e) => s + (e.amount || 0), 0);
+    const totalNightsSold = bks.reduce((s, b) => {
+      const ci = new Date(Math.max(new Date(b.check_in), new Date(startDate)));
+      const co = new Date(Math.min(new Date(b.check_out), new Date(year, month, 1)));
+      return s + Math.max(0, Math.ceil((co - ci) / 86400000));
+    }, 0);
+    const totalStays = bks.length;
+    const totalNightsBooked = bks.reduce((s, b) => s + Math.max(1, Math.ceil((new Date(b.check_out) - new Date(b.check_in)) / 86400000)), 0);
+    const revpar = totalAvailableNights > 0 ? Math.round(totalGross / totalAvailableNights) : 0;
+    const goppar = totalAvailableNights > 0 ? Math.round((totalGross - totalExpenses) / totalAvailableNights) : 0;
+    const alos = totalStays > 0 ? parseFloat((totalNightsBooked / totalStays).toFixed(1)) : 0;
+    const trevpar = totalAvailableNights > 0 ? Math.round(totalGross / totalAvailableNights) : 0;
+    const adr = totalNightsSold > 0 ? Math.round(totalGross / totalNightsSold) : 0;
+    const occupancyRate = totalAvailableNights > 0 ? Math.round(totalNightsSold / totalAvailableNights * 100) : 0;
+    // Per-property breakdown
+    const properties = filteredProps.map(p => {
+      const pb = bks.filter(b => b.property_id === p.id);
+      const pRooms = p.total_rooms || 1;
+      const pAvail = pRooms * daysInMonth;
+      const pGross = pb.reduce((s, b) => s + (b.gross_amount || 0), 0);
+      const pExps = monthExps.filter(e => e.property_id === p.id).reduce((s, e) => s + (e.amount || 0), 0);
+      const pNightsSold = pb.reduce((s, b) => {
+        const ci = new Date(Math.max(new Date(b.check_in), new Date(startDate)));
+        const co = new Date(Math.min(new Date(b.check_out), new Date(year, month, 1)));
+        return s + Math.max(0, Math.ceil((co - ci) / 86400000));
+      }, 0);
+      const pTotalNights = pb.reduce((s, b) => s + Math.max(1, Math.ceil((new Date(b.check_out) - new Date(b.check_in)) / 86400000)), 0);
+      return {
+        property_name: p.name, revpar: pAvail > 0 ? Math.round(pGross / pAvail) : 0,
+        goppar: pAvail > 0 ? Math.round((pGross - pExps) / pAvail) : 0,
+        alos: pb.length > 0 ? parseFloat((pTotalNights / pb.length).toFixed(1)) : 0,
+        adr: pNightsSold > 0 ? Math.round(pGross / pNightsSold) : 0,
+        occupancy: pAvail > 0 ? Math.round(pNightsSold / pAvail * 100) : 0,
+        revenue: pGross
+      };
+    });
+    res.json({ period: { year, month }, revpar, goppar, alos, trevpar, adr, occupancy_rate: occupancyRate, total_revenue: totalGross, total_expenses: totalExpenses, properties });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// --- CHANNEL PROFITABILITY ---
+app.get('/api/reports/channel-profitability', async (req, res) => {
+  try {
+    const { year, month } = parseMonthYear(req.query);
+    const propFilter = req.query.property_id ? parseInt(req.query.property_id) : null;
+    const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
+    const endDate = new Date(year, month, 0).toISOString().split('T')[0];
+    const allBks = useMongo ? await Booking.find().lean() : store.bookings;
+    let bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.check_in >= startDate && b.check_in <= endDate);
+    if (propFilter) bks = bks.filter(b => b.property_id === propFilter);
+    const commissionRates = { direct: 0, airbnb: 0.15, 'booking.com': 0.15, agoda: 0.18, makemytrip: 0.20, goibibo: 0.20 };
+    const channels = {};
+    bks.forEach(b => {
+      const ch = (b.channel || 'direct').toLowerCase();
+      if (!channels[ch]) channels[ch] = { channel: ch, bookings: 0, gross: 0, commission: 0, net_after_commission: 0 };
+      const gross = b.gross_amount || 0;
+      const rate = commissionRates[ch] || 0;
+      const commission = Math.round(gross * rate);
+      channels[ch].bookings++;
+      channels[ch].gross += gross;
+      channels[ch].commission += commission;
+      channels[ch].net_after_commission += (gross - commission);
+    });
+    const channelList = Object.values(channels).sort((a, b) => b.gross - a.gross);
+    const totalGross = channelList.reduce((s, c) => s + c.gross, 0);
+    const totalCommission = channelList.reduce((s, c) => s + c.commission, 0);
+    const directGross = channels.direct?.gross || 0;
+    const otaGross = totalGross - directGross;
+    res.json({
+      channels: channelList.map(c => ({ ...c, share_pct: totalGross > 0 ? Math.round(c.gross / totalGross * 100) : 0, commission_rate: Math.round((commissionRates[c.channel] || 0) * 100) })),
+      summary: { total_gross: totalGross, total_commission: totalCommission, net_after_commission: totalGross - totalCommission, direct_pct: totalGross > 0 ? Math.round(directGross / totalGross * 100) : 0, ota_pct: totalGross > 0 ? Math.round(otaGross / totalGross * 100) : 0, commission_drain_pct: totalGross > 0 ? parseFloat((totalCommission / totalGross * 100).toFixed(1)) : 0 }
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1372,35 +1482,35 @@ app.get('/', (req, res) => {
     <div class="stats-grid" id="statsGrid">
       <div class="stat-card">
         <div class="stat-card-top">
-          <div class="stat-icon" style="background:linear-gradient(135deg,var(--accent),var(--purple));font-size:10px;font-weight:600;text-align:center;line-height:1.2">Properties</div>
-          <span class="stat-badge up" id="propBadge">Loading</span>
-        </div>
-        <div class="stat-value" id="propCount">--</div>
-        <div class="stat-label">Total Properties</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-card-top">
           <div class="stat-icon" style="background:linear-gradient(135deg,var(--pink),var(--orange));font-size:10px;font-weight:600;text-align:center;line-height:1.2">Bookings</div>
           <span class="stat-badge up" id="bookBadge">Loading</span>
         </div>
         <div class="stat-value" id="bookCount">--</div>
-        <div class="stat-label">Total Bookings</div>
+        <div class="stat-label" id="bookLabel">This Month Bookings</div>
       </div>
       <div class="stat-card">
         <div class="stat-card-top">
-          <div class="stat-icon" style="background:linear-gradient(135deg,var(--green),var(--cyan));font-size:10px;font-weight:600;text-align:center;line-height:1.2">Guests</div>
-          <span class="stat-badge up" id="guestBadge">Loading</span>
+          <div class="stat-icon" style="background:linear-gradient(135deg,var(--green),var(--cyan));font-size:10px;font-weight:600;text-align:center;line-height:1.2">Revenue</div>
+          <span class="stat-badge up" id="revBadge">Loading</span>
         </div>
-        <div class="stat-value" id="guestCount">--</div>
-        <div class="stat-label">Total Guests</div>
+        <div class="stat-value" id="revCount">--</div>
+        <div class="stat-label" id="revLabel">This Month Revenue</div>
       </div>
       <div class="stat-card">
         <div class="stat-card-top">
-          <div class="stat-icon" style="background:linear-gradient(135deg,var(--cyan),var(--blue));font-size:10px;font-weight:600;text-align:center;line-height:1.2">Channels</div>
-          <span class="stat-badge up">Active</span>
+          <div class="stat-icon" style="background:linear-gradient(135deg,var(--accent),var(--purple));font-size:10px;font-weight:600;text-align:center;line-height:1.2">Staying</div>
+          <span class="stat-badge up" id="stayBadge">Loading</span>
         </div>
-        <div class="stat-value" id="channelCount">--</div>
-        <div class="stat-label">Active Channels</div>
+        <div class="stat-value" id="stayCount">--</div>
+        <div class="stat-label">Currently Staying</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-card-top">
+          <div class="stat-icon" style="background:linear-gradient(135deg,var(--cyan),var(--blue));font-size:10px;font-weight:600;text-align:center;line-height:1.2">Pending</div>
+          <span class="stat-badge warn" id="pendBadge">Loading</span>
+        </div>
+        <div class="stat-value" id="pendCount">--</div>
+        <div class="stat-label">Pending Payments</div>
       </div>
     </div>
 
@@ -1445,54 +1555,40 @@ app.get('/', (req, res) => {
 
     async function loadStats() {
       try {
-        const [propsRes, booksRes, guestsRes, channelsRes] = await Promise.allSettled([
-          fetch(API + '/properties'),
-          fetch(API + '/bookings'),
-          fetch(API + '/guests'),
-          fetch(API + '/channel-manager/accounts')
-        ]);
+        const res = await fetch(API + '/reports/dashboard');
+        if (!res.ok) throw new Error('Dashboard API failed');
+        const d = await res.json();
+        const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        const now = new Date();
+        const mLabel = monthNames[now.getMonth()] + ' ' + now.getFullYear();
 
-        if (propsRes.status === 'fulfilled' && propsRes.value.ok) {
-          const data = await propsRes.value.json();
-          const count = Array.isArray(data) ? data.length : (data.properties ? data.properties.length : 0);
-          document.getElementById('propCount').textContent = count;
-          document.getElementById('propBadge').textContent = count + ' active';
-        } else {
-          document.getElementById('propCount').textContent = '6';
-          document.getElementById('propBadge').textContent = 'Default';
-        }
+        // Bookings this month
+        document.getElementById('bookCount').textContent = d.month?.total_bookings || 0;
+        document.getElementById('bookBadge').textContent = mLabel;
+        document.getElementById('bookLabel').textContent = mLabel + ' Bookings';
 
-        if (booksRes.status === 'fulfilled' && booksRes.value.ok) {
-          const data = await booksRes.value.json();
-          const allBookings = Array.isArray(data) ? data : (data.bookings || []);
-          const activeCount = allBookings.filter(b => b.booking_status === 'confirmed' || b.booking_status === 'checked-in').length;
-          const totalCount = allBookings.length;
-          document.getElementById('bookCount').textContent = totalCount;
-          document.getElementById('bookBadge').textContent = activeCount > 0 ? activeCount + ' Active' : 'None active';
-        } else {
-          document.getElementById('bookCount').textContent = '0';
-          document.getElementById('bookBadge').textContent = '--';
-        }
+        // Revenue this month
+        const gross = d.month?.gross_revenue || 0;
+        document.getElementById('revCount').textContent = '₹' + gross.toLocaleString('en-IN');
+        document.getElementById('revBadge').textContent = mLabel;
+        document.getElementById('revLabel').textContent = mLabel + ' Revenue';
 
-        if (guestsRes.status === 'fulfilled' && guestsRes.value.ok) {
-          const data = await guestsRes.value.json();
-          const count = Array.isArray(data) ? data.length : (data.guests ? data.guests.length : 0);
-          document.getElementById('guestCount').textContent = count;
-          document.getElementById('guestBadge').textContent = count > 0 ? 'Registered' : 'None';
-        } else {
-          document.getElementById('guestCount').textContent = '0';
-          document.getElementById('guestBadge').textContent = '--';
-        }
+        // Currently staying
+        const staying = d.today?.currently_staying || 0;
+        document.getElementById('stayCount').textContent = staying;
+        document.getElementById('stayBadge').textContent = staying > 0 ? staying + ' guests' : 'None';
 
-        if (channelsRes.status === 'fulfilled' && channelsRes.value.ok) {
-          const data = await channelsRes.value.json();
-          const count = Array.isArray(data) ? data.length : (data.accounts ? data.accounts.length : 0);
-          document.getElementById('channelCount').textContent = count;
-        } else {
-          document.getElementById('channelCount').textContent = '2';
-        }
+        // Pending payments
+        const pendingList = d.pending || [];
+        const pendingTotal = pendingList.reduce((s, p) => s + (p.pending_amount || 0), 0);
+        document.getElementById('pendCount').textContent = '₹' + pendingTotal.toLocaleString('en-IN');
+        document.getElementById('pendBadge').textContent = pendingList.length > 0 ? pendingList.length + ' due' : 'All clear';
       } catch (e) {
         console.error('Failed to load stats:', e);
+        document.getElementById('bookCount').textContent = '--';
+        document.getElementById('revCount').textContent = '--';
+        document.getElementById('stayCount').textContent = '--';
+        document.getElementById('pendCount').textContent = '--';
       }
     }
 

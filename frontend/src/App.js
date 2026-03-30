@@ -231,6 +231,48 @@ const Dashboard = () => {
         />
       </div>
 
+      {/* Financial Pacing */}
+      {stats?.pacing && (
+        <div className="card pacing-widget" style={{ marginBottom: '20px' }}>
+          <div className="card-header">
+            <h3>Revenue Pacing</h3>
+            <span style={{ fontSize: '12px', color: '#94a3b8' }}>Day {stats.pacing.days_elapsed} of {stats.pacing.days_in_month}</span>
+          </div>
+          <div className="card-content">
+            <div className="pacing-row">
+              <div className="pacing-item">
+                <span className="pacing-label">Current Month</span>
+                <span className="pacing-value">₹{stats.pacing.current_month.toLocaleString()}</span>
+              </div>
+              <div className="pacing-item">
+                <span className="pacing-label">Last Month (Full)</span>
+                <span className="pacing-value">₹{stats.pacing.prev_month.toLocaleString()}</span>
+              </div>
+              <div className="pacing-item">
+                <span className="pacing-label">Projected</span>
+                <span className="pacing-value">₹{stats.pacing.projected_month_end.toLocaleString()}</span>
+              </div>
+              <div className="pacing-item">
+                <span className="pacing-label">vs Last Month</span>
+                <span className={`pacing-value ${stats.pacing.delta_pct >= 0 ? 'text-green' : 'text-red'}`}>
+                  {stats.pacing.delta_pct >= 0 ? '+' : ''}{stats.pacing.delta_pct}%
+                </span>
+              </div>
+            </div>
+            <div className="pacing-bar-container">
+              <div className="pacing-bar-track">
+                <div className="pacing-bar-fill" style={{ width: `${Math.min(100, stats.pacing.prev_month > 0 ? (stats.pacing.current_month / stats.pacing.prev_month * 100) : 100)}%` }} />
+                <div className="pacing-bar-marker" style={{ left: `${Math.min(100, (stats.pacing.days_elapsed / stats.pacing.days_in_month) * 100)}%` }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-light)', marginTop: '4px' }}>
+                <span>₹0</span>
+                <span>Last month: ₹{stats.pacing.prev_month.toLocaleString()}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="dashboard-grid">
         <div className="card">
           <div className="card-header">
@@ -1606,6 +1648,8 @@ const Reports = () => {
   const [adrData, setAdrData] = useState(null);
   const [expSummary, setExpSummary] = useState(null);
   const [occupancy, setOccupancy] = useState(null);
+  const [kpiMetrics, setKpiMetrics] = useState(null);
+  const [channelProfit, setChannelProfit] = useState(null);
   const [loading, setLoading] = useState(true);
   const [year, setYear] = useState(new Date().getFullYear());
   const [month, setMonth] = useState(new Date().getMonth() + 1);
@@ -1631,7 +1675,9 @@ const Reports = () => {
       api.get('/reports/payment-summary', { params }),
       api.get('/reports/adr', { params }),
       api.get('/expenses/summary', { params }),
-      api.get('/bookings/stats/overview', { params })
+      api.get('/bookings/stats/overview', { params }),
+      api.get('/reports/kpi-metrics', { params }),
+      api.get('/reports/channel-profitability', { params })
     ]);
     const val = (i) => results[i].status === 'fulfilled' ? results[i].value.data : null;
     if (val(0)) setReport(val(0));
@@ -1641,6 +1687,8 @@ const Reports = () => {
     if (val(4)) setAdrData(val(4));
     if (val(5)) setExpSummary(val(5));
     if (val(6)) setOccupancy(val(6));
+    if (val(7)) setKpiMetrics(val(7));
+    if (val(8)) setChannelProfit(val(8));
     setLoading(false);
   };
 
@@ -1695,9 +1743,9 @@ const Reports = () => {
   const downloadGuestsPDF = () => {
     if (!guestAnalytics) return;
     generateReportPDF('Guest Analytics', subTitle, [{
-      title: 'Top Guests by Lifetime Value',
-      head: ['#', 'Guest', 'Phone', 'Stays', 'Lifetime Value'],
-      body: guestAnalytics.topGuests?.map((g, i) => [i + 1, g.name, g.phone || '-', g.total_stays, `₹${g.lifetime_value.toLocaleString()}`]) || []
+      title: 'Top Guests by Revenue',
+      head: ['#', 'Guest', 'Phone', 'Stays', 'Total Spent'],
+      body: guestAnalytics.topGuests?.map((g, i) => [i + 1, g.name, g.phone || '-', g.total_stays, `₹${(g.total_spent || g.lifetime_value || 0).toLocaleString()}`]) || []
     }], [
       { label: 'Total Guests', value: String(guestAnalytics.total_guests) },
       { label: 'New Guests', value: String(guestAnalytics.new_guests) },
@@ -1731,12 +1779,32 @@ const Reports = () => {
     }], [{ label: 'Overall ADR', value: `₹${adrData.overall_adr.toLocaleString()}` }]);
   };
 
-  const downloadMap = { pnl: downloadPnlPDF, revenue: downloadRevenuePDF, occupancy: downloadOccupancyPDF, expenses: downloadExpensesPDF, guests: downloadGuestsPDF, payments: downloadPaymentsPDF, adr: downloadAdrPDF };
+  const downloadKpiPDF = () => {
+    if (!kpiMetrics) return;
+    generateReportPDF('KPI Metrics Report', subTitle, [{
+      title: 'Key Performance Indicators',
+      head: ['Property', 'RevPAR', 'GOPPAR', 'ALOS', 'ADR', 'Occupancy'],
+      body: kpiMetrics.properties?.map(p => [p.property_name, `₹${p.revpar.toLocaleString()}`, `₹${p.goppar.toLocaleString()}`, `${p.alos} nights`, `₹${p.adr.toLocaleString()}`, `${p.occupancy}%`]) || []
+    }], [{ label: 'RevPAR', value: `₹${kpiMetrics.revpar.toLocaleString()}` }, { label: 'GOPPAR', value: `₹${kpiMetrics.goppar.toLocaleString()}` }, { label: 'ALOS', value: `${kpiMetrics.alos} nights` }]);
+  };
+
+  const downloadChannelPDF = () => {
+    if (!channelProfit) return;
+    generateReportPDF('Channel Profitability Report', subTitle, [{
+      title: 'Channel Performance',
+      head: ['Channel', 'Bookings', 'Gross Revenue', 'Commission %', 'Commission', 'Net Revenue', 'Share %'],
+      body: channelProfit.channels?.map(c => [c.channel, c.bookings, `₹${c.gross.toLocaleString()}`, `${c.commission_rate}%`, `-₹${c.commission.toLocaleString()}`, `₹${c.net_after_commission.toLocaleString()}`, `${c.share_pct}%`]) || []
+    }], [{ label: 'Direct %', value: `${channelProfit.summary.direct_pct}%` }, { label: 'Commission Drain', value: `₹${channelProfit.summary.total_commission.toLocaleString()}` }]);
+  };
+
+  const downloadMap = { pnl: downloadPnlPDF, revenue: downloadRevenuePDF, occupancy: downloadOccupancyPDF, expenses: downloadExpensesPDF, guests: downloadGuestsPDF, payments: downloadPaymentsPDF, adr: downloadAdrPDF, kpi: downloadKpiPDF, channels: downloadChannelPDF };
 
   if (loading) return <LoadingSpinner />;
 
   const tabs = [
     { id: 'pnl', label: 'P&L' },
+    { id: 'kpi', label: 'KPIs' },
+    { id: 'channels', label: 'Channels' },
     { id: 'revenue', label: 'Revenue' },
     { id: 'occupancy', label: 'Occupancy' },
     { id: 'expenses', label: 'Expenses' },
@@ -1825,6 +1893,111 @@ const Reports = () => {
             </table>
           </div>
         </>
+      )}
+
+      {/* KPI Metrics Tab */}
+      {activeTab === 'kpi' && kpiMetrics && (
+        <div className="report-sections">
+          <div className="stats-grid">
+            <StatCard title="RevPAR" value={`₹${kpiMetrics.revpar.toLocaleString()}`} icon={TrendingUp} color="#6366f1" />
+            <StatCard title="GOPPAR" value={`₹${kpiMetrics.goppar.toLocaleString()}`} icon={IndianRupee} color="#10b981" />
+            <StatCard title="Avg Length of Stay" value={`${kpiMetrics.alos} nights`} icon={Clock} color="#f59e0b" />
+            <StatCard title="ADR" value={`₹${kpiMetrics.adr.toLocaleString()}`} icon={BarChart3} color="#3b82f6" />
+          </div>
+          <div className="stats-grid" style={{ marginTop: '12px' }}>
+            <StatCard title="Occupancy Rate" value={`${kpiMetrics.occupancy_rate}%`} icon={Home} color="#8b5cf6" />
+            <StatCard title="Total Revenue" value={`₹${kpiMetrics.total_revenue.toLocaleString()}`} icon={IndianRupee} color="#10b981" />
+          </div>
+          <div className="card" style={{ marginTop: '16px' }}>
+            <div className="card-header"><h3>KPIs by Property</h3></div>
+            <div className="report-table">
+              <table>
+                <thead><tr><th>Property</th><th>RevPAR</th><th>GOPPAR</th><th>ALOS</th><th>ADR</th><th>Occ %</th></tr></thead>
+                <tbody>
+                  {kpiMetrics.properties?.map(p => (
+                    <tr key={p.property_name}>
+                      <td>{p.property_name}</td>
+                      <td>₹{p.revpar.toLocaleString()}</td>
+                      <td className={p.goppar >= 0 ? 'profit' : 'text-red'}>₹{p.goppar.toLocaleString()}</td>
+                      <td>{p.alos}</td>
+                      <td>₹{p.adr.toLocaleString()}</td>
+                      <td>{p.occupancy}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="card" style={{ marginTop: '16px', padding: '16px' }}>
+            <div className="kpi-glossary">
+              <h4 style={{ margin: '0 0 8px', fontSize: '13px', color: 'var(--text-secondary)' }}>Glossary</h4>
+              <div style={{ fontSize: '12px', color: 'var(--text-light)', lineHeight: 1.6 }}>
+                <div><strong>RevPAR</strong> — Revenue Per Available Room (Total Revenue ÷ Available Room-Nights)</div>
+                <div><strong>GOPPAR</strong> — Gross Operating Profit Per Available Room ((Revenue − Expenses) ÷ Available Room-Nights)</div>
+                <div><strong>ALOS</strong> — Average Length of Stay (Total Nights ÷ Total Bookings)</div>
+                <div><strong>ADR</strong> — Average Daily Rate (Revenue ÷ Nights Sold)</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Channel Profitability Tab */}
+      {activeTab === 'channels' && channelProfit && (
+        <div className="report-sections">
+          <div className="stats-grid">
+            <StatCard title="Direct Revenue %" value={`${channelProfit.summary.direct_pct}%`} icon={TrendingUp} color="#10b981" />
+            <StatCard title="OTA Revenue %" value={`${channelProfit.summary.ota_pct}%`} icon={BarChart3} color="#f59e0b" />
+            <StatCard title="Commission Drain" value={`₹${channelProfit.summary.total_commission.toLocaleString()}`} icon={AlertCircle} color="#ef4444" />
+            <StatCard title="Net After Commission" value={`₹${channelProfit.summary.net_after_commission.toLocaleString()}`} icon={IndianRupee} color="#3b82f6" />
+          </div>
+          {/* Direct vs OTA bar */}
+          <div className="card" style={{ marginTop: '16px' }}>
+            <div className="card-header"><h3>Direct vs OTA Split</h3></div>
+            <div className="card-content">
+              <div className="channel-split-bar">
+                <div className="channel-split-direct" style={{ width: `${channelProfit.summary.direct_pct}%` }}>
+                  {channelProfit.summary.direct_pct > 10 && `Direct ${channelProfit.summary.direct_pct}%`}
+                </div>
+                <div className="channel-split-ota" style={{ width: `${channelProfit.summary.ota_pct}%` }}>
+                  {channelProfit.summary.ota_pct > 10 && `OTA ${channelProfit.summary.ota_pct}%`}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="card" style={{ marginTop: '16px' }}>
+            <div className="card-header"><h3>Channel Breakdown</h3></div>
+            <div className="report-table">
+              <table>
+                <thead><tr><th>Channel</th><th>Bookings</th><th>Gross</th><th>Comm %</th><th>Commission</th><th>Net</th><th>Share</th></tr></thead>
+                <tbody>
+                  {channelProfit.channels?.map(c => (
+                    <tr key={c.channel}>
+                      <td style={{ textTransform: 'capitalize' }}>{c.channel}</td>
+                      <td>{c.bookings}</td>
+                      <td>₹{c.gross.toLocaleString()}</td>
+                      <td>{c.commission_rate}%</td>
+                      <td className="text-red">{c.commission > 0 ? `-₹${c.commission.toLocaleString()}` : '₹0'}</td>
+                      <td className="profit">₹{c.net_after_commission.toLocaleString()}</td>
+                      <td>{c.share_pct}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr style={{ fontWeight: 700, borderTop: '2px solid var(--border)' }}>
+                    <td>Total</td>
+                    <td>{channelProfit.channels?.reduce((s, c) => s + c.bookings, 0)}</td>
+                    <td>₹{channelProfit.summary.total_gross.toLocaleString()}</td>
+                    <td>{channelProfit.summary.commission_drain_pct}%</td>
+                    <td className="text-red">-₹{channelProfit.summary.total_commission.toLocaleString()}</td>
+                    <td className="profit">₹{channelProfit.summary.net_after_commission.toLocaleString()}</td>
+                    <td>100%</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Revenue Tab */}
@@ -1990,14 +2163,11 @@ const Reports = () => {
             <StatCard title="Repeat Guests" value={guestAnalytics.repeat_guests} icon={RefreshCw} color="#f59e0b" />
             <StatCard title="Repeat Rate" value={`${guestAnalytics.repeat_rate}%`} icon={TrendingUp} color="#3b82f6" />
           </div>
-          <div className="stats-grid" style={{ marginTop: '16px' }}>
-            <StatCard title="Avg Lifetime Value" value={`₹${guestAnalytics.avg_lifetime_value.toLocaleString()}`} icon={IndianRupee} color="#8b5cf6" />
-          </div>
           <div className="card" style={{ marginTop: '16px' }}>
-            <div className="card-header"><h3>Top Guests by Lifetime Value</h3></div>
+            <div className="card-header"><h3>Top Guests by Revenue</h3></div>
             <div className="report-table">
               <table>
-                <thead><tr><th>#</th><th>Guest</th><th>Phone</th><th>Stays</th><th>Lifetime Value</th></tr></thead>
+                <thead><tr><th>#</th><th>Guest</th><th>Phone</th><th>Stays</th><th>Total Spent</th></tr></thead>
                 <tbody>
                   {guestAnalytics.topGuests?.map((g, i) => (
                     <tr key={g.id}>
@@ -2005,7 +2175,7 @@ const Reports = () => {
                       <td>{g.name}</td>
                       <td>{g.phone}</td>
                       <td>{g.total_stays}</td>
-                      <td className="profit">₹{g.lifetime_value.toLocaleString()}</td>
+                      <td className="profit">₹{(g.total_spent || g.lifetime_value || 0).toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>
