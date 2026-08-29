@@ -5,7 +5,6 @@ import axios from 'axios';
 import { format as fnsFormat, addDays } from 'date-fns';
 import jsPDF from 'jspdf';
 import { applyPlugin } from 'jspdf-autotable';
-applyPlugin(jsPDF);
 import {
   LayoutDashboard, Building2, Calendar, Users,
   IndianRupee, BarChart3, Settings, Bell, Menu, X,
@@ -14,6 +13,8 @@ import {
   UserX, AlertCircle, CheckCircle, Clock, Link2, Trash2, ExternalLink, Edit3,
   Download, Upload, Copy, FileText
 } from 'lucide-react';
+
+applyPlugin(jsPDF);
 
 const format = fnsFormat;
 const safeFormat = (dateStr, fmt) => {
