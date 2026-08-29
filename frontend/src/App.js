@@ -684,7 +684,8 @@ const generateBookingWhatsAppMsg = (b, prop) => {
     paymentLine += ` (payable at check-in)`;
   }
   const locationLine = b.google_maps_link || (prop && prop.google_maps_link) || '';
-  const propName = b.property_name || (prop && prop.name) || 'Stay Nestura';
+  const rawPropName = b.property_name || (prop && prop.name) || 'Stay Nestura';
+  const propName = rawPropName.replace(/\s*by\s+Stay\s+Nestura\s*$/i, '').trim() || 'Stay Nestura';
   let msg = `*Booking Confirmed – ${propName} by Stay Nestura*\n\n`;
   msg += `Guest: ${b.first_name} ${b.last_name || ''}\n`;
   msg += `Guests: ${guestCount.join(', ') || '1 Adult'}\n`;
