@@ -24,6 +24,30 @@ async function nextId(collection) {
   return Counter.getNextId(collection);
 }
 
+// Currency-safe money helpers (paise-based to avoid float drift) + booking amount validation.
+// Rule enforced everywhere (frontend, backend, invoice): perDayAmount x numberOfDays == finalAmount.
+const toPaiseServer = (v) => Math.round((parseFloat(v) || 0) * 100);
+function validateBookingAmounts({ check_in, check_out, nightly_rate, gross_amount, cleaning_fee, service_fee, taxes }) {
+  const nights = Math.ceil((new Date(check_out) - new Date(check_in)) / 86400000);
+  if (!(nights > 0)) return { error: 'INVALID_NIGHTS', message: 'Number of days must be greater than zero.' };
+  const perDay = parseFloat(nightly_rate);
+  const final = parseFloat(gross_amount);
+  if (nightly_rate == null || isNaN(perDay) || perDay <= 0) return { error: 'INVALID_AMOUNT', message: 'Per-day amount must be greater than zero.' };
+  if (gross_amount == null || isNaN(final) || final <= 0) return { error: 'INVALID_AMOUNT', message: 'Final amount must be greater than zero.' };
+  const extrasPaise = toPaiseServer(cleaning_fee) + toPaiseServer(service_fee) + toPaiseServer(taxes);
+  const expectedPaise = toPaiseServer(perDay) * nights + extrasPaise;
+  const finalPaise = toPaiseServer(final);
+  if (expectedPaise !== finalPaise) {
+    return {
+      error: 'AMOUNT_MISMATCH',
+      message: 'Per-day amount multiplied by number of days does not match the final amount.',
+      expected: expectedPaise / 100,
+      provided: finalPaise / 100
+    };
+  }
+  return null;
+}
+
 // Import auth route (has demo login)
 const authRoutes = require('./backend/routes/auth');
 
@@ -300,6 +324,9 @@ app.post('/api/bookings', async (req, res) => {
     if (!b.check_in || !b.check_out || !b.property_id) return res.status(400).json({ error: 'check_in, check_out and property_id are required' });
     if (b.check_in >= b.check_out) return res.status(400).json({ error: 'check_out must be after check_in' });
 
+    const amountError = validateBookingAmounts(b);
+    if (amountError) return res.status(400).json(amountError);
+
     const propertyIdInt = parseInt(b.property_id);
     let conflictBookings;
     if (useMongo) {
@@ -389,15 +416,24 @@ app.put('/api/bookings/:id', async (req, res) => {
     const allowedFields = ['property_id','guest_id','channel','check_in','check_out','adults','children','infants','nightly_rate','subtotal','cleaning_fee','service_fee','taxes','gross_amount','commission_percent','commission_amount','net_amount','payment_status','payment_method','paid_amount','pending_amount','booking_status','guest_message','special_requests','check_in_time','check_out_time','first_name','last_name','phone','email'];
     const updates = {};
     for (const key of allowedFields) { if (req.body[key] !== undefined) updates[key] = req.body[key]; }
+
+    const current = useMongo ? await Booking.findOne({ id: parseInt(req.params.id) }).lean() : store.bookings.find(bk => bk.id == req.params.id);
+    if (!current) return res.status(404).json({ error: 'Not found' });
+
+    const amountFieldsTouched = ['check_in', 'check_out', 'nightly_rate', 'gross_amount', 'cleaning_fee', 'service_fee', 'taxes'].some(f => updates[f] !== undefined);
+    if (amountFieldsTouched) {
+      const merged = { ...current, ...updates };
+      const amountError = validateBookingAmounts(merged);
+      if (amountError) return res.status(400).json(amountError);
+    }
+
     if (useMongo) {
       const b = await Booking.findOneAndUpdate({ id: parseInt(req.params.id) }, { $set: updates }, { new: true }).lean();
       if (!b) return res.status(404).json({ error: 'Not found' });
       return res.json(b);
     }
-    const b = store.bookings.find(bk => bk.id == req.params.id);
-    if (!b) return res.status(404).json({ error: 'Not found' });
-    Object.assign(b, updates, { updated_at: new Date().toISOString() });
-    res.json(b);
+    Object.assign(current, updates, { updated_at: new Date().toISOString() });
+    res.json(current);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 app.patch('/api/bookings/:id/payment', async (req, res) => {

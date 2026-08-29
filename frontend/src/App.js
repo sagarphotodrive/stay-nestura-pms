@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate,
 import { io } from 'socket.io-client';
 import axios from 'axios';
 import { format as fnsFormat, addDays } from 'date-fns';
+import { isValidPhoneNumber, parsePhoneNumberFromString, getCountries, getCountryCallingCode } from 'libphonenumber-js';
 import jsPDF from 'jspdf';
 import { applyPlugin } from 'jspdf-autotable';
 import {
@@ -21,6 +22,117 @@ const safeFormat = (dateStr, fmt) => {
   if (!dateStr) return '-';
   try { const d = new Date(dateStr + (dateStr.length === 10 ? 'T00:00:00' : '')); return isNaN(d.getTime()) ? '-' : fnsFormat(d, fmt); }
   catch { return '-'; }
+};
+
+// International phone number helpers — E.164 storage, no hardcoded country.
+// Legacy data (plain digits with no country code, e.g. old Indian guest records)
+// is assumed India for backward compatibility only when no '+' prefix is present.
+const isPhoneValid = (phone) => {
+  if (!phone) return false;
+  const trimmed = String(phone).trim();
+  try {
+    return trimmed.startsWith('+') ? isValidPhoneNumber(trimmed) : isValidPhoneNumber(trimmed, 'IN');
+  } catch { return false; }
+};
+
+const toE164 = (phone, defaultCountry = 'IN') => {
+  if (!phone) return '';
+  const trimmed = String(phone).trim();
+  try {
+    const p = parsePhoneNumberFromString(trimmed, trimmed.startsWith('+') ? undefined : defaultCountry);
+    return p && p.isValid() ? p.number : trimmed;
+  } catch { return trimmed; }
+};
+
+// Digits-only, country-code-included number for wa.me links — derived from the
+// guest's own selected country, never a hardcoded prefix.
+const toWhatsAppNumber = (phone) => toE164(phone).replace(/[^\d]/g, '');
+
+const countryDisplayNames = (() => {
+  try { return new Intl.DisplayNames(['en'], { type: 'region' }); } catch { return null; }
+})();
+const toFlagEmoji = (iso2) => iso2.toUpperCase().replace(/./g, c => String.fromCodePoint(127397 + c.charCodeAt(0)));
+const PRIORITY_COUNTRIES = ['IN', 'AE', 'US', 'GB'];
+const countryOptions = (() => {
+  const all = getCountries();
+  const rest = all.filter(c => !PRIORITY_COUNTRIES.includes(c))
+    .sort((a, b) => (countryDisplayNames ? countryDisplayNames.of(a) : a).localeCompare(countryDisplayNames ? countryDisplayNames.of(b) : b));
+  return [...PRIORITY_COUNTRIES, ...rest].map(iso2 => ({
+    iso2,
+    name: countryDisplayNames ? countryDisplayNames.of(iso2) : iso2,
+    callingCode: getCountryCallingCode(iso2),
+    flag: toFlagEmoji(iso2)
+  }));
+})();
+
+// Country + local-number input that stores/returns a normalized E.164 string.
+const PhoneInput = ({ value, onChange, required, placeholder }) => {
+  const deriveFromValue = (v) => {
+    if (v && String(v).trim().startsWith('+')) {
+      try {
+        const p = parsePhoneNumberFromString(String(v).trim());
+        if (p) return { country: p.country || 'IN', national: p.nationalNumber };
+      } catch {}
+    }
+    return { country: 'IN', national: (v || '').replace(/\D/g, '') };
+  };
+  const [country, setCountry] = useState(() => deriveFromValue(value).country);
+  const [national, setNational] = useState(() => deriveFromValue(value).national);
+  const lastExternal = React.useRef(value);
+
+  useEffect(() => {
+    if (value !== lastExternal.current) {
+      lastExternal.current = value;
+      const d = deriveFromValue(value);
+      setCountry(d.country);
+      setNational(d.national);
+    }
+  }, [value]);
+
+  const emit = (c, n) => {
+    const digits = (n || '').replace(/\D/g, '');
+    if (!digits) { onChange(''); return; }
+    try {
+      const full = `+${getCountryCallingCode(c)}${digits}`;
+      const p = parsePhoneNumberFromString(full, c);
+      if (p) { onChange(p.number); return; }
+    } catch {}
+    onChange(digits);
+  };
+
+  const valid = !national || isPhoneValid(value);
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '6px' }}>
+        <select
+          value={country}
+          onChange={e => { setCountry(e.target.value); lastExternal.current = value; emit(e.target.value, national); }}
+          style={{ maxWidth: '150px', flexShrink: 0 }}
+        >
+          {countryOptions.map(c => <option key={c.iso2} value={c.iso2}>{c.flag} +{c.callingCode} {c.name}</option>)}
+        </select>
+        <input
+          required={required}
+          type="tel"
+          value={national}
+          onChange={e => { const v = e.target.value.replace(/[^\d\s]/g, ''); setNational(v); lastExternal.current = value; emit(country, v); }}
+          placeholder={placeholder || 'Phone number'}
+          style={{ flex: 1, borderColor: valid ? undefined : '#ef4444' }}
+        />
+      </div>
+      {!valid && <span style={{ color: '#ef4444', fontSize: '12px' }}>Enter a valid phone number for the selected country</span>}
+    </div>
+  );
+};
+
+// Currency-safe money helpers (work in paise/cents to avoid float drift)
+const toPaise = (v) => Math.round((parseFloat(v) || 0) * 100);
+const paiseToRupees = (p) => (p / 100);
+const computeNights = (checkIn, checkOut) => {
+  if (!checkIn || !checkOut) return 0;
+  const n = Math.ceil((new Date(checkOut) - new Date(checkIn)) / 86400000);
+  return n > 0 ? n : 0;
 };
 
 // API Configuration
@@ -575,12 +687,17 @@ const generateBookingWhatsAppMsg = (b, prop) => {
   const propName = b.property_name || (prop && prop.name) || 'Stay Nestura';
   let msg = `*Booking Confirmed – ${propName} by Stay Nestura*\n\n`;
   msg += `Guest: ${b.first_name} ${b.last_name || ''}\n`;
-  msg += `Guests: ${guestCount.join(', ') || '1 Adult'}\n\n`;
+  msg += `Guests: ${guestCount.join(', ') || '1 Adult'}\n`;
+  msg += `Booking ID: ${b.id}\n\n`;
   msg += `Check-in: ${ciDate} | ${checkInTime} onwards\n`;
   msg += `Check-out: ${coDate} | ${checkOutTime}\n\n`;
   msg += `Payment:\n${paymentLine}\n`;
   if (locationLine) msg += `\nLocation:\n${locationLine}\n`;
-  msg += `\n*MANDATORY before check-in*\nPlease complete online check-in:\nhttps://bnbhost.in/staynestura\n`;
+  msg += `\n*IMPORTANT – GUEST ID REQUIREMENT*\n`;
+  msg += `Please send all guests' valid ID proofs, with the address clearly visible, to:\n*guestdetails@staynestura.com*\n`;
+  msg += `Irrespective of your check-in time, we may deny entry if the required guest IDs are not received beforehand.\n`;
+  msg += `\n*IMPORTANT – EXTRA GUESTS / SERVICES*\n`;
+  msg += `Any extra guest, additional service, or other extra charge is chargeable and requires valid address proof.\n`;
   const isSolapurGroup = [3, 5, 6].includes(b.property_id);
   const contactNo = isSolapurGroup ? '9766504266' : '7499075244';
   const emergencyNo = isSolapurGroup ? '8308122281' : '9766504266';
@@ -589,14 +706,18 @@ const generateBookingWhatsAppMsg = (b, prop) => {
   msg += `• Kitchen utensils must be cleaned before check-out.\n  (₹250 charge if maid service required for utensils only. ₹500 for house cleaning if staying less than 3 days. For more than 3 days, every third day room service will be provided.)\n`;
   msg += `• Please use water & electricity wisely — Turn off taps and shower in time and don't let water just flow away as we receive corporation water supply once in 5 days!! Switch off all appliances and lights when they are not in use.\n`;
   msg += `• This is a homestay, not a hotel, so kindly take care of it and treat it as your own home. 😊\n`;
-  msg += `\nTeam ${propName} by Stay Nestura`;
+  msg += `\nPlease ensure the required documents are submitted before arrival to avoid any inconvenience.\n`;
+  msg += `\nThank you,\nTeam ${propName} by Stay Nestura`;
   return msg;
 };
 
 const openWhatsApp = (b, prop) => {
+  if (!isPhoneValid(b.phone)) {
+    alert('Please enter a valid international phone number before sending the WhatsApp message.');
+    return;
+  }
   const msg = generateBookingWhatsAppMsg(b, prop);
-  const phone = (b.phone || '').replace(/\D/g, '');
-  const fullPhone = phone.startsWith('91') ? phone : `91${phone}`;
+  const fullPhone = toWhatsAppNumber(b.phone);
   window.open(`https://wa.me/${fullPhone}?text=${encodeURIComponent(msg)}`, '_blank');
 };
 
@@ -813,6 +934,9 @@ const MasterCalendar = () => {
                   <span className="detail-value">{selectedBooking.special_requests}</span>
                 </div>
               )}
+              <div className="availability-indicator conflict" style={{ marginTop: '12px' }}>
+                <AlertCircle size={16} /> Guest ID proof (address visible) required at <strong>guestdetails@staynestura.com</strong> — entry may be denied if not received, regardless of check-in time. Extra guests/services are chargeable and require valid address proof.
+              </div>
               <div className="form-actions" style={{ marginTop: '16px', gap: '8px' }}>
                 <button className="btn btn-whatsapp" onClick={() => openWhatsApp(selectedBooking)}>WhatsApp</button>
                 <button className="btn btn-secondary" onClick={() => copyBookingMessage(selectedBooking)}><Copy size={14} /> Copy</button>
@@ -923,7 +1047,7 @@ const Bookings = () => {
   const [submitting, setSubmitting] = useState(false);
   const [properties, setProperties] = useState([]);
   const [availabilityStatus, setAvailabilityStatus] = useState(null);
-  const emptyBForm = { property_id: '', first_name: '', last_name: '', phone: '', email: '', check_in: '', check_out: '', adults: 1, children: 0, nightly_rate: '', channel: 'direct', payment_method: 'UPI', special_requests: '', advance_paid: 0 };
+  const emptyBForm = { property_id: '', first_name: '', last_name: '', phone: '', email: '', check_in: '', check_out: '', adults: 1, children: 0, nightly_rate: '', final_amount: '', channel: 'direct', payment_method: 'UPI', special_requests: '', advance_paid: 0 };
   const [bForm, setBForm] = useState(emptyBForm);
 
   // Auto-open prefilled form from calendar click or homepage action=new
@@ -1017,8 +1141,37 @@ const Bookings = () => {
       setProperties(pRes.data || []);
     } catch (err) {}
     setEditId(b.id);
-    setBForm({ property_id: String(b.property_id), first_name: b.first_name || '', last_name: b.last_name || '', phone: b.phone || '', email: b.email || '', check_in: b.check_in, check_out: b.check_out, adults: b.adults || 1, children: b.children || 0, nightly_rate: b.nightly_rate || '', channel: b.channel || 'direct', payment_method: b.payment_method || 'UPI', special_requests: b.special_requests || '', advance_paid: b.paid_amount || 0 });
+    setBForm({ property_id: String(b.property_id), first_name: b.first_name || '', last_name: b.last_name || '', phone: b.phone || '', email: b.email || '', check_in: b.check_in, check_out: b.check_out, adults: b.adults || 1, children: b.children || 0, nightly_rate: b.nightly_rate || '', final_amount: (b.gross_amount != null ? b.gross_amount : '') , channel: b.channel || 'direct', payment_method: b.payment_method || 'UPI', special_requests: b.special_requests || '', advance_paid: b.paid_amount || 0 });
     setShowForm(true);
+  };
+
+  const bNights = computeNights(bForm.check_in, bForm.check_out);
+  const bPerDayPaise = toPaise(bForm.nightly_rate);
+  const bFinalPaise = toPaise(bForm.final_amount);
+  const bCalculatedPaise = bPerDayPaise * bNights;
+  const bAmountsReady = bForm.nightly_rate !== '' && bForm.final_amount !== '' && bNights > 0;
+  const bAmountsMatch = !bAmountsReady || bCalculatedPaise === bFinalPaise;
+
+  const handlePerDayChange = (val) => {
+    setBForm(prev => {
+      const next = { ...prev, nightly_rate: val };
+      if (prev.final_amount === '' || prev.final_amount == null) {
+        const nights = computeNights(prev.check_in, prev.check_out);
+        if (nights > 0 && val !== '') next.final_amount = paiseToRupees(toPaise(val) * nights).toFixed(2);
+      }
+      return next;
+    });
+  };
+
+  const handleFinalAmountChange = (val) => {
+    setBForm(prev => {
+      const next = { ...prev, final_amount: val };
+      if (prev.nightly_rate === '' || prev.nightly_rate == null) {
+        const nights = computeNights(prev.check_in, prev.check_out);
+        if (nights > 0 && val !== '') next.nightly_rate = paiseToRupees(toPaise(val) / nights).toFixed(2);
+      }
+      return next;
+    });
   };
 
   const handleBooking = async (e) => {
@@ -1032,14 +1185,25 @@ const Bookings = () => {
       alert('Please select a property.');
       return;
     }
+    if (bNights <= 0) {
+      alert('Number of days must be greater than zero.');
+      return;
+    }
+    if (!(parseFloat(bForm.nightly_rate) > 0) || !(parseFloat(bForm.final_amount) > 0)) {
+      alert('Per-day amount and final amount must be greater than zero.');
+      return;
+    }
+    if (!bAmountsMatch) {
+      alert('Amount mismatch: Per-day amount × number of days does not match the final amount. Please check the entered amounts.');
+      return;
+    }
     if (availabilityStatus && !availabilityStatus.available) {
       alert('Cannot save booking: dates conflict with an existing booking.\n\n' + availabilityStatus.conflicts.map(c => `• ${c.guest_name} (${c.check_in} to ${c.check_out})`).join('\n'));
       return;
     }
     setSubmitting(true);
     try {
-      const nights = Math.max(1, Math.ceil((new Date(bForm.check_out) - new Date(bForm.check_in)) / 86400000));
-      const gross = parseFloat(bForm.nightly_rate) * nights;
+      const gross = paiseToRupees(bFinalPaise);
       const advancePaid = parseFloat(bForm.advance_paid) || 0;
       const data = { ...bForm, property_id: parseInt(bForm.property_id), nightly_rate: parseFloat(bForm.nightly_rate), gross_amount: gross, adults: parseInt(bForm.adults), children: parseInt(bForm.children), paid_amount: advancePaid, pending_amount: gross - advancePaid, payment_status: advancePaid >= gross ? 'paid' : advancePaid > 0 ? 'partial' : 'pending' };
       if (editId) { await api.put(`/bookings/${editId}`, data); } else { await api.post('/bookings', data); }
@@ -1049,7 +1213,7 @@ const Bookings = () => {
       setAvailabilityStatus(null);
       fetchBookings();
     } catch (err) {
-      const msg = err.response?.data?.error || 'Failed to save booking';
+      const msg = err.response?.data?.message || err.response?.data?.error || 'Failed to save booking';
       alert(msg);
     } finally {
       setSubmitting(false);
@@ -1093,7 +1257,7 @@ const Bookings = () => {
           <div className="modal-content modal-large" onClick={e => e.stopPropagation()}>
             <div className="modal-header"><h2>{editId ? 'Edit Booking' : 'New Booking'}</h2><button className="modal-close" onClick={() => setShowForm(false)}><X size={20}/></button></div>
             <form onSubmit={handleBooking} className="modal-form">
-              <div className="form-group"><label>Property *</label><select required value={bForm.property_id} onChange={e => { const p = properties.find(pr => pr.id === parseInt(e.target.value)); setBForm({...bForm, property_id: e.target.value, nightly_rate: p ? p.base_price : bForm.nightly_rate}); }}><option value="">Select property</option>{properties.map(p => <option key={p.id} value={p.id}>{p.name} - ₹{p.base_price}/night</option>)}</select></div>
+              <div className="form-group"><label>Property *</label><select required value={bForm.property_id} onChange={e => { const p = properties.find(pr => pr.id === parseInt(e.target.value)); setBForm(prev => ({...prev, property_id: e.target.value})); if (p && !bForm.nightly_rate) handlePerDayChange(String(p.base_price)); }}><option value="">Select property</option>{properties.map(p => <option key={p.id} value={p.id}>{p.name} - ₹{p.base_price}/night</option>)}</select></div>
 
               <h4 style={{ margin: '12px 0 8px', color: '#94a3b8', fontSize: '14px' }}>Guest Details</h4>
               <div className="form-row">
@@ -1101,9 +1265,12 @@ const Bookings = () => {
                 <div className="form-group"><label>Last Name *</label><input required value={bForm.last_name} onChange={e => setBForm({...bForm, last_name: e.target.value})} placeholder="Last name"/></div>
               </div>
               <div className="form-row">
-                <div className="form-group"><label>Phone *</label><input required value={bForm.phone} onChange={e => setBForm({...bForm, phone: e.target.value})} placeholder="10-digit mobile"/></div>
+                <div className="form-group"><label>Phone *</label><PhoneInput required value={bForm.phone} onChange={v => setBForm({...bForm, phone: v})} placeholder="Mobile number"/></div>
                 <div className="form-group"><label>Email</label><input type="email" value={bForm.email} onChange={e => setBForm({...bForm, email: e.target.value})} placeholder="Email address"/></div>
               </div>
+              <p style={{ fontSize: '12px', color: '#94a3b8', margin: '-4px 0 12px' }}>
+                Reminder: all guests' ID proofs (address visible) must be collected — send/forward to <strong>guestdetails@staynestura.com</strong>. Entry may be denied without them, regardless of check-in time.
+              </p>
 
               <h4 style={{ margin: '12px 0 8px', color: '#94a3b8', fontSize: '14px' }}>Booking Details</h4>
               <div className="form-row">
@@ -1130,18 +1297,30 @@ const Bookings = () => {
 
               <h4 style={{ margin: '12px 0 8px', color: '#94a3b8', fontSize: '14px' }}>Payment Details</h4>
               <div className="form-row">
-                <div className="form-group"><label>Nightly Rate (₹) *</label><input required type="number" value={bForm.nightly_rate} onChange={e => setBForm({...bForm, nightly_rate: e.target.value})} placeholder="e.g. 2500"/></div>
-                <div className="form-group"><label>Total Amount (₹)</label><input type="text" readOnly value={bForm.nightly_rate && bForm.check_in && bForm.check_out ? `₹${(parseFloat(bForm.nightly_rate) * Math.max(1, Math.ceil((new Date(bForm.check_out) - new Date(bForm.check_in)) / 86400000))).toLocaleString()}` : 'Fill dates & rate'} style={{ background: '#1e293b', color: '#e2e8f0', fontWeight: 600 }}/></div>
+                <div className="form-group"><label>Number of Nights</label><input type="text" readOnly value={bNights > 0 ? bNights : (bForm.check_in && bForm.check_out ? '0' : 'Select dates')} style={{ background: '#1e293b', color: '#e2e8f0', fontWeight: 600 }}/></div>
               </div>
               <div className="form-row">
+                <div className="form-group"><label>Per Day Amount (₹) *</label><input required type="number" step="0.01" min="0" value={bForm.nightly_rate} onChange={e => handlePerDayChange(e.target.value)} placeholder="e.g. 1800"/></div>
+                <div className="form-group"><label>Final Amount (₹) *</label><input required type="number" step="0.01" min="0" value={bForm.final_amount} onChange={e => handleFinalAmountChange(e.target.value)} placeholder="e.g. 7200" style={!bAmountsMatch ? { borderColor: '#ef4444', boxShadow: '0 0 0 1px #ef4444' } : undefined}/></div>
+              </div>
+              {bAmountsReady && (
+                <div className={`availability-indicator ${bAmountsMatch ? 'available' : 'conflict'}`} style={{ marginBottom: '12px' }}>
+                  {bAmountsMatch ? (
+                    <><CheckCircle size={16} /> ₹{parseFloat(bForm.nightly_rate).toLocaleString()} × {bNights} = ₹{paiseToRupees(bCalculatedPaise).toLocaleString()} — Amounts match</>
+                  ) : (
+                    <><AlertCircle size={16} /> ₹{parseFloat(bForm.nightly_rate).toLocaleString()} × {bNights} = ₹{paiseToRupees(bCalculatedPaise).toLocaleString()} — Amount mismatch. Per-day amount × number of days must equal final amount.</>
+                  )}
+                </div>
+              )}
+              <div className="form-row">
                 <div className="form-group"><label>Advance Paid (₹)</label><input type="number" min="0" value={bForm.advance_paid} onChange={e => setBForm({...bForm, advance_paid: e.target.value})} placeholder="0"/></div>
-                <div className="form-group"><label>Balance Due (₹)</label><input type="text" readOnly value={bForm.nightly_rate && bForm.check_in && bForm.check_out ? (() => { const t = parseFloat(bForm.nightly_rate) * Math.max(1, Math.ceil((new Date(bForm.check_out) - new Date(bForm.check_in)) / 86400000)); const b = t - (parseFloat(bForm.advance_paid) || 0); return `₹${b.toLocaleString()}`; })() : 'Fill dates & rate'} style={{ background: '#1e293b', fontWeight: 600, color: bForm.nightly_rate && bForm.check_in && bForm.check_out && (parseFloat(bForm.nightly_rate) * Math.max(1, Math.ceil((new Date(bForm.check_out) - new Date(bForm.check_in)) / 86400000)) - (parseFloat(bForm.advance_paid) || 0)) > 0 ? '#ef4444' : '#10b981' }}/></div>
+                <div className="form-group"><label>Balance Due (₹)</label><input type="text" readOnly value={bForm.final_amount !== '' ? `₹${(paiseToRupees(bFinalPaise) - (parseFloat(bForm.advance_paid) || 0)).toLocaleString()}` : 'Fill amounts'} style={{ background: '#1e293b', fontWeight: 600, color: bForm.final_amount !== '' && (paiseToRupees(bFinalPaise) - (parseFloat(bForm.advance_paid) || 0)) > 0 ? '#ef4444' : '#10b981' }}/></div>
                 <div className="form-group"><label>Payment Method</label><select value={bForm.payment_method} onChange={e => setBForm({...bForm, payment_method: e.target.value})}><option value="UPI">UPI</option><option value="cash">Cash</option><option value="card">Card</option><option value="bank_transfer">Bank Transfer</option></select></div>
               </div>
               <div className="form-group"><label>Special Requests</label><textarea value={bForm.special_requests} onChange={e => setBForm({...bForm, special_requests: e.target.value})} rows="2" placeholder="Any special requests..."/></div>
               <div className="form-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary" disabled={submitting || (!editId && availabilityStatus && !availabilityStatus.available)}>{submitting ? 'Saving...' : editId ? 'Save Changes' : 'Create Booking'}</button>
+                <button type="submit" className="btn btn-primary" disabled={submitting || !bAmountsMatch || (!editId && availabilityStatus && !availabilityStatus.available)}>{submitting ? 'Saving...' : editId ? 'Save Changes' : 'Create Booking'}</button>
               </div>
             </form>
           </div>
@@ -1336,7 +1515,7 @@ const Guests = () => {
                 <div className="form-group"><label>Last Name *</label><input required value={gForm.last_name} onChange={e => setGForm({...gForm, last_name: e.target.value})} placeholder="Last name"/></div>
               </div>
               <div className="form-row">
-                <div className="form-group"><label>Phone *</label><input required value={gForm.phone} onChange={e => setGForm({...gForm, phone: e.target.value})} placeholder="10-digit phone"/></div>
+                <div className="form-group"><label>Phone *</label><PhoneInput required value={gForm.phone} onChange={v => setGForm({...gForm, phone: v})} placeholder="Phone number"/></div>
                 <div className="form-group"><label>Email</label><input type="email" value={gForm.email} onChange={e => setGForm({...gForm, email: e.target.value})} placeholder="Email address"/></div>
               </div>
               <div className="form-group"><label>Address</label><input value={gForm.address} onChange={e => setGForm({...gForm, address: e.target.value})} placeholder="Full address"/></div>
@@ -1531,9 +1710,9 @@ const Expenses = () => {
     generateReportPDF('Expenses', dateRange, [{
       title: `Expense Details (${expenses.length} transactions)`,
       head: ['Date', 'Description', 'Category', 'Property', 'Payment', 'Amount'],
-      body: [...expenses.map(e => [format(new Date(e.expense_date), 'dd MMM yyyy'), e.description, e.category.replace(/_/g, ' '), e.property_id === 0 ? 'Common' : (e.property_name || '-'), e.payment_method, `₹${parseFloat(e.amount).toLocaleString()}`]),
-        [{ content: 'Total', styles: { fontStyle: 'bold' }, colSpan: 5 }, `₹${total.toLocaleString()}`]]
-    }], [{ label: 'Total Expenses', value: `₹${total.toLocaleString()}` }, { label: 'Transactions', value: String(expenses.length) }]);
+      body: [...expenses.map(e => [format(new Date(e.expense_date), 'dd MMM yyyy'), e.description, e.category.replace(/_/g, ' '), e.property_id === 0 ? 'Common' : (e.property_name || '-'), e.payment_method, `INR ${parseFloat(e.amount).toLocaleString()}`]),
+        [{ content: 'Total', styles: { fontStyle: 'bold' }, colSpan: 5 }, `INR ${total.toLocaleString()}`]]
+    }], [{ label: 'Total Expenses', value: `INR ${total.toLocaleString()}` }, { label: 'Transactions', value: String(expenses.length) }]);
   };
 
   if (loading) return <LoadingSpinner />;
@@ -1727,11 +1906,11 @@ const generateBookingBillPDF = (booking) => {
   y = doc.lastAutoTable.finalY + 10;
 
   const charges = [
-    ['Nightly Rate', `₹${(parseFloat(booking.nightly_rate) || 0).toLocaleString()} x ${nights}`, `₹${(parseFloat(booking.subtotal) || (parseFloat(booking.nightly_rate) || 0) * nights).toLocaleString()}`]
+    ['Accommodation', `INR ${(parseFloat(booking.nightly_rate) || 0).toLocaleString()} x ${nights} night${nights > 1 ? 's' : ''}`, `INR ${(parseFloat(booking.subtotal) || (parseFloat(booking.nightly_rate) || 0) * nights).toLocaleString()}`]
   ];
-  if (parseFloat(booking.cleaning_fee) > 0) charges.push(['Cleaning Fee', '', `₹${parseFloat(booking.cleaning_fee).toLocaleString()}`]);
-  if (parseFloat(booking.service_fee) > 0) charges.push(['Service Fee', '', `₹${parseFloat(booking.service_fee).toLocaleString()}`]);
-  if (parseFloat(booking.taxes) > 0) charges.push(['Taxes', '', `₹${parseFloat(booking.taxes).toLocaleString()}`]);
+  if (parseFloat(booking.cleaning_fee) > 0) charges.push(['Cleaning Fee', '', `INR ${parseFloat(booking.cleaning_fee).toLocaleString()}`]);
+  if (parseFloat(booking.service_fee) > 0) charges.push(['Service Fee', '', `INR ${parseFloat(booking.service_fee).toLocaleString()}`]);
+  if (parseFloat(booking.taxes) > 0) charges.push(['Taxes', '', `INR ${parseFloat(booking.taxes).toLocaleString()}`]);
 
   doc.autoTable({
     startY: y,
@@ -1747,9 +1926,9 @@ const generateBookingBillPDF = (booking) => {
   doc.autoTable({
     startY: y,
     body: [
-      ['Total Amount', `₹${gross.toLocaleString()}`],
-      ['Paid', `₹${paid.toLocaleString()}`],
-      ['Balance Due', `₹${due.toLocaleString()}`]
+      ['Total Amount', `INR ${gross.toLocaleString()}`],
+      ['Paid', `INR ${paid.toLocaleString()}`],
+      ['Balance Due', `INR ${due.toLocaleString()}`]
     ],
     theme: 'plain',
     styles: { fontSize: 10, cellPadding: 2, font: 'helvetica', fontStyle: 'bold' },
@@ -1761,10 +1940,15 @@ const generateBookingBillPDF = (booking) => {
   if (booking.payment_method) {
     doc.setFontSize(9); doc.setTextColor(100); doc.setFont('helvetica', 'normal');
     doc.text(`Payment Method: ${booking.payment_method}`, 14, y);
-    y += 6;
+    y += 8;
   }
 
-  doc.setFontSize(7); doc.setTextColor(150);
+  doc.setFontSize(8); doc.setTextColor(120); doc.setFont('helvetica', 'italic');
+  const idNotice = doc.splitTextToSize('Guest ID Policy: All guests\' ID proofs (address visible) must be sent to guestdetails@staynestura.com. Entry may be denied without them, irrespective of check-in time. Extra guests/services are chargeable and require valid address proof.', pageW - 28);
+  doc.text(idNotice, 14, y);
+  y += idNotice.length * 4 + 4;
+
+  doc.setFontSize(7); doc.setTextColor(150); doc.setFont('helvetica', 'normal');
   doc.text(`Generated on ${format(new Date(), 'dd MMM yyyy, hh:mm a')} | Stay Nestura PMS`, 14, doc.internal.pageSize.getHeight() - 8);
   doc.save(`Stay-Nestura-Bill-${booking.id}-${(booking.first_name || 'Guest').replace(/[^a-zA-Z0-9]/g, '-')}.pdf`);
 };
@@ -1867,20 +2051,20 @@ const Reports = () => {
     generateReportPDF('Profit & Loss Report', subTitle, [{
       title: 'Property-wise P&L',
       head: ['Property', 'Nights Sold', 'Occupancy %', 'Gross Revenue', 'Expenses', 'Net Profit'],
-      body: [...report.properties.map(p => [p.property_name, `${p.nights_sold}/${p.available_nights}`, `${p.occupancy_percent}%`, `₹${p.gross_revenue.toLocaleString()}`, `-₹${p.expenses.toLocaleString()}`, `₹${p.net_profit.toLocaleString()}`]),
-        [{ content: 'Total', styles: { fontStyle: 'bold' } }, '', '', `₹${report.totals.total_gross.toLocaleString()}`, `-₹${report.totals.total_expenses.toLocaleString()}`, `₹${report.totals.total_net.toLocaleString()}`]]
+      body: [...report.properties.map(p => [p.property_name, `${p.nights_sold}/${p.available_nights}`, `${p.occupancy_percent}%`, `INR ${p.gross_revenue.toLocaleString()}`, `-INR ${p.expenses.toLocaleString()}`, `INR ${p.net_profit.toLocaleString()}`]),
+        [{ content: 'Total', styles: { fontStyle: 'bold' } }, '', '', `INR ${report.totals.total_gross.toLocaleString()}`, `-INR ${report.totals.total_expenses.toLocaleString()}`, `INR ${report.totals.total_net.toLocaleString()}`]]
     }], [
-      { label: 'Total Revenue', value: `₹${report.totals.total_gross.toLocaleString()}` },
-      { label: 'Expenses', value: `-₹${report.totals.total_expenses.toLocaleString()}` },
-      { label: 'Net Profit', value: `₹${report.totals.total_net.toLocaleString()}` }
+      { label: 'Total Revenue', value: `INR ${report.totals.total_gross.toLocaleString()}` },
+      { label: 'Expenses', value: `-INR ${report.totals.total_expenses.toLocaleString()}` },
+      { label: 'Net Profit', value: `INR ${report.totals.total_net.toLocaleString()}` }
     ]);
   };
 
   const downloadRevenuePDF = () => {
     if (!revenue) return;
     const tables = [];
-    if (revenue.byChannel?.length) tables.push({ title: 'Revenue by Channel', head: ['Channel', 'Bookings', 'Revenue'], body: [...revenue.byChannel.map(c => [c.channel, c.bookings, `₹${c.gross.toLocaleString()}`]), [{ content: 'Total', styles: { fontStyle: 'bold' } }, revenue.byChannel.reduce((s,c) => s+c.bookings, 0), `₹${revenue.byChannel.reduce((s,c) => s+c.gross, 0).toLocaleString()}`]] });
-    if (revenue.byProperty?.length) tables.push({ title: 'Revenue by Property', head: ['Property', 'Gross Revenue'], body: [...revenue.byProperty.map(p => [p.property_name, `₹${p.gross.toLocaleString()}`]), [{ content: 'Total', styles: { fontStyle: 'bold' } }, `₹${revenue.byProperty.reduce((s,p) => s+p.gross, 0).toLocaleString()}`]] });
+    if (revenue.byChannel?.length) tables.push({ title: 'Revenue by Channel', head: ['Channel', 'Bookings', 'Revenue'], body: [...revenue.byChannel.map(c => [c.channel, c.bookings, `INR ${c.gross.toLocaleString()}`]), [{ content: 'Total', styles: { fontStyle: 'bold' } }, revenue.byChannel.reduce((s,c) => s+c.bookings, 0), `INR ${revenue.byChannel.reduce((s,c) => s+c.gross, 0).toLocaleString()}`]] });
+    if (revenue.byProperty?.length) tables.push({ title: 'Revenue by Property', head: ['Property', 'Gross Revenue'], body: [...revenue.byProperty.map(p => [p.property_name, `INR ${p.gross.toLocaleString()}`]), [{ content: 'Total', styles: { fontStyle: 'bold' } }, `INR ${revenue.byProperty.reduce((s,p) => s+p.gross, 0).toLocaleString()}`]] });
     generateReportPDF('Revenue Report', subTitle, tables);
   };
 
@@ -1893,17 +2077,17 @@ const Reports = () => {
     }], [
       { label: 'Total Bookings', value: String(occupancy.summary?.total_bookings || 0) },
       { label: 'Unique Guests', value: String(occupancy.summary?.unique_guests || 0) },
-      { label: 'Gross Revenue', value: `₹${(occupancy.summary?.total_gross || 0).toLocaleString()}` },
-      { label: 'Net Revenue', value: `₹${(occupancy.summary?.total_net || 0).toLocaleString()}` }
+      { label: 'Gross Revenue', value: `INR ${(occupancy.summary?.total_gross || 0).toLocaleString()}` },
+      { label: 'Net Revenue', value: `INR ${(occupancy.summary?.total_net || 0).toLocaleString()}` }
     ]);
   };
 
   const downloadExpensesPDF = () => {
     if (!expSummary) return;
     const tables = [];
-    if (expSummary.byCategory?.length) tables.push({ title: 'Expenses by Category', head: ['Category', 'Count', 'Total'], body: expSummary.byCategory.map(c => [c.category, c.count, `₹${c.total.toLocaleString()}`]) });
-    if (expSummary.byProperty?.length) tables.push({ title: 'Expenses by Property', head: ['Property', 'Total'], body: expSummary.byProperty.map(p => [p.property_name, `₹${p.total.toLocaleString()}`]) });
-    generateReportPDF('Expenses Report', subTitle, tables, [{ label: 'Total Expenses', value: `₹${(expSummary.total || 0).toLocaleString()}` }]);
+    if (expSummary.byCategory?.length) tables.push({ title: 'Expenses by Category', head: ['Category', 'Count', 'Total'], body: expSummary.byCategory.map(c => [c.category, c.count, `INR ${c.total.toLocaleString()}`]) });
+    if (expSummary.byProperty?.length) tables.push({ title: 'Expenses by Property', head: ['Property', 'Total'], body: expSummary.byProperty.map(p => [p.property_name, `INR ${p.total.toLocaleString()}`]) });
+    generateReportPDF('Expenses Report', subTitle, tables, [{ label: 'Total Expenses', value: `INR ${(expSummary.total || 0).toLocaleString()}` }]);
   };
 
   const downloadGuestsPDF = () => {
@@ -1911,7 +2095,7 @@ const Reports = () => {
     generateReportPDF('Guest Analytics', subTitle, [{
       title: 'Top Guests by Revenue',
       head: ['#', 'Guest', 'Phone', 'Stays', 'Total Spent'],
-      body: guestAnalytics.topGuests?.map((g, i) => [i + 1, g.name, g.phone || '-', g.total_stays, `₹${(g.total_spent || g.lifetime_value || 0).toLocaleString()}`]) || []
+      body: guestAnalytics.topGuests?.map((g, i) => [i + 1, g.name, g.phone || '-', g.total_stays, `INR ${(g.total_spent || g.lifetime_value || 0).toLocaleString()}`]) || []
     }], [
       { label: 'Total Guests', value: String(guestAnalytics.total_guests) },
       { label: 'New Guests', value: String(guestAnalytics.new_guests) },
@@ -1926,12 +2110,12 @@ const Reports = () => {
       title: 'Payment Breakdown',
       head: ['Status', 'Count', 'Amount'],
       body: [
-        ['Fully Paid', paymentSummary.paid.count, `₹${paymentSummary.paid.total.toLocaleString()}`],
-        ['Partial - Collected', paymentSummary.partial.count, `₹${paymentSummary.partial.collected.toLocaleString()}`],
-        ['Partial - Remaining', '', `₹${paymentSummary.partial.remaining.toLocaleString()}`],
-        ['Pending', paymentSummary.pending.count, `₹${paymentSummary.pending.total.toLocaleString()}`],
-        [{ content: 'Total Collected', styles: { fontStyle: 'bold' } }, '', `₹${paymentSummary.total_collected.toLocaleString()}`],
-        [{ content: 'Total Pending', styles: { fontStyle: 'bold' } }, '', `₹${paymentSummary.total_pending.toLocaleString()}`]
+        ['Fully Paid', paymentSummary.paid.count, `INR ${paymentSummary.paid.total.toLocaleString()}`],
+        ['Partial - Collected', paymentSummary.partial.count, `INR ${paymentSummary.partial.collected.toLocaleString()}`],
+        ['Partial - Remaining', '', `INR ${paymentSummary.partial.remaining.toLocaleString()}`],
+        ['Pending', paymentSummary.pending.count, `INR ${paymentSummary.pending.total.toLocaleString()}`],
+        [{ content: 'Total Collected', styles: { fontStyle: 'bold' } }, '', `INR ${paymentSummary.total_collected.toLocaleString()}`],
+        [{ content: 'Total Pending', styles: { fontStyle: 'bold' } }, '', `INR ${paymentSummary.total_pending.toLocaleString()}`]
       ]
     }]);
   };
@@ -1941,8 +2125,8 @@ const Reports = () => {
     generateReportPDF('ADR Report', subTitle, [{
       title: 'Average Daily Rate by Property',
       head: ['Property', 'Base Price', 'Nights Sold', 'Total Revenue', 'ADR', 'vs Base'],
-      body: adrData.properties?.map(p => [p.property_name, `₹${p.base_price.toLocaleString()}`, p.nights_sold, `₹${p.total_revenue.toLocaleString()}`, `₹${p.adr.toLocaleString()}`, p.base_price > 0 ? `${p.adr >= p.base_price ? '+' : ''}${Math.round((p.adr - p.base_price) / p.base_price * 100)}%` : 'N/A']) || []
-    }], [{ label: 'Overall ADR', value: `₹${adrData.overall_adr.toLocaleString()}` }]);
+      body: adrData.properties?.map(p => [p.property_name, `INR ${p.base_price.toLocaleString()}`, p.nights_sold, `INR ${p.total_revenue.toLocaleString()}`, `INR ${p.adr.toLocaleString()}`, p.base_price > 0 ? `${p.adr >= p.base_price ? '+' : ''}${Math.round((p.adr - p.base_price) / p.base_price * 100)}%` : 'N/A']) || []
+    }], [{ label: 'Overall ADR', value: `INR ${adrData.overall_adr.toLocaleString()}` }]);
   };
 
   const downloadKpiPDF = () => {
@@ -1950,8 +2134,8 @@ const Reports = () => {
     generateReportPDF('KPI Metrics Report', subTitle, [{
       title: 'Key Performance Indicators',
       head: ['Property', 'RevPAR', 'GOPPAR', 'ALOS', 'ADR', 'Occupancy'],
-      body: kpiMetrics.properties?.map(p => [p.property_name, `₹${p.revpar.toLocaleString()}`, `₹${p.goppar.toLocaleString()}`, `${p.alos} nights`, `₹${p.adr.toLocaleString()}`, `${p.occupancy}%`]) || []
-    }], [{ label: 'RevPAR', value: `₹${kpiMetrics.revpar.toLocaleString()}` }, { label: 'GOPPAR', value: `₹${kpiMetrics.goppar.toLocaleString()}` }, { label: 'ALOS', value: `${kpiMetrics.alos} nights` }]);
+      body: kpiMetrics.properties?.map(p => [p.property_name, `INR ${p.revpar.toLocaleString()}`, `INR ${p.goppar.toLocaleString()}`, `${p.alos} nights`, `INR ${p.adr.toLocaleString()}`, `${p.occupancy}%`]) || []
+    }], [{ label: 'RevPAR', value: `INR ${kpiMetrics.revpar.toLocaleString()}` }, { label: 'GOPPAR', value: `INR ${kpiMetrics.goppar.toLocaleString()}` }, { label: 'ALOS', value: `${kpiMetrics.alos} nights` }]);
   };
 
   const downloadChannelPDF = () => {
@@ -1959,8 +2143,8 @@ const Reports = () => {
     generateReportPDF('Channel Profitability Report', subTitle, [{
       title: 'Channel Performance',
       head: ['Channel', 'Bookings', 'Gross Revenue', 'Commission %', 'Commission', 'Net Revenue', 'Share %'],
-      body: channelProfit.channels?.map(c => [c.channel, c.bookings, `₹${c.gross.toLocaleString()}`, `${c.commission_rate}%`, `-₹${c.commission.toLocaleString()}`, `₹${c.net_after_commission.toLocaleString()}`, `${c.share_pct}%`]) || []
-    }], [{ label: 'Direct %', value: `${channelProfit.summary.direct_pct}%` }, { label: 'Commission Drain', value: `₹${channelProfit.summary.total_commission.toLocaleString()}` }]);
+      body: channelProfit.channels?.map(c => [c.channel, c.bookings, `INR ${c.gross.toLocaleString()}`, `${c.commission_rate}%`, `-INR ${c.commission.toLocaleString()}`, `INR ${c.net_after_commission.toLocaleString()}`, `${c.share_pct}%`]) || []
+    }], [{ label: 'Direct %', value: `${channelProfit.summary.direct_pct}%` }, { label: 'Commission Drain', value: `INR ${channelProfit.summary.total_commission.toLocaleString()}` }]);
   };
 
   const downloadMap = { pnl: downloadPnlPDF, revenue: downloadRevenuePDF, occupancy: downloadOccupancyPDF, expenses: downloadExpensesPDF, guests: downloadGuestsPDF, payments: downloadPaymentsPDF, adr: downloadAdrPDF, kpi: downloadKpiPDF, channels: downloadChannelPDF };
