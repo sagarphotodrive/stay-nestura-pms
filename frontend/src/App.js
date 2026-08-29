@@ -4,7 +4,8 @@ import { io } from 'socket.io-client';
 import axios from 'axios';
 import { format as fnsFormat, addDays } from 'date-fns';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import { applyPlugin } from 'jspdf-autotable';
+applyPlugin(jsPDF);
 import {
   LayoutDashboard, Building2, Calendar, Users,
   IndianRupee, BarChart3, Settings, Bell, Menu, X,
@@ -167,10 +168,75 @@ const Sidebar = ({ isOpen, onClose, activeTab, setActiveTab }) => {
   );
 };
 
+// Generate Bill modal — property -> date -> booking -> PDF
+const GenerateBillModal = ({ onClose }) => {
+  const [properties, setProperties] = useState([]);
+  const [propertyId, setPropertyId] = useState('');
+  const [date, setDate] = useState('');
+  const [bookings, setBookings] = useState([]);
+  const [loadingBookings, setLoadingBookings] = useState(false);
+
+  useEffect(() => {
+    api.get('/properties').then(res => setProperties(res.data || [])).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!propertyId || !date) { setBookings([]); return; }
+    setLoadingBookings(true);
+    api.get('/bookings', { params: { property_id: propertyId, start_date: date, end_date: date, limit: 100 } })
+      .then(res => setBookings((res.data.bookings || res.data || []).filter(b => b.booking_status !== 'cancelled')))
+      .catch(() => setBookings([]))
+      .finally(() => setLoadingBookings(false));
+  }, [propertyId, date]);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={e => e.stopPropagation()}>
+        <div className="modal-header"><h2>Generate Bill</h2><button className="modal-close" onClick={onClose}><X size={20}/></button></div>
+        <div className="modal-form">
+          <div className="form-group">
+            <label>Property *</label>
+            <select value={propertyId} onChange={e => setPropertyId(e.target.value)}>
+              <option value="">Select property</option>
+              {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+          <div className="form-group">
+            <label>Date *</label>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)} />
+          </div>
+
+          {propertyId && date && (
+            loadingBookings ? <LoadingSpinner /> : (
+              bookings.length === 0 ? (
+                <p className="empty-state">No bookings found for this property on this date.</p>
+              ) : (
+                <div className="form-group">
+                  <label>Select Booking *</label>
+                  {bookings.map(b => (
+                    <div key={b.id} className="booking-item" style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '0.75rem', marginBottom: '0.5rem', cursor: 'pointer' }} onClick={() => { generateBookingBillPDF(b); onClose(); }}>
+                      <div className="booking-info">
+                        <span className="booking-guest">{b.first_name} {b.last_name}</span>
+                        <span className="booking-property">{safeFormat(b.check_in, 'MMM dd')} - {safeFormat(b.check_out, 'MMM dd, yyyy')} | ₹{(parseFloat(b.gross_amount || b.net_amount) || 0).toLocaleString()}</span>
+                      </div>
+                      <FileText size={16} />
+                    </div>
+                  ))}
+                </div>
+              )
+            )
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // Dashboard Component
 const Dashboard = () => {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showBillModal, setShowBillModal] = useState(false);
 
   useEffect(() => {
     fetchDashboard();
@@ -361,8 +427,14 @@ const Dashboard = () => {
             <BarChart3 size={20} />
             <span>View Reports</span>
           </Link>
+          <button type="button" className="action-btn" onClick={() => setShowBillModal(true)}>
+            <FileText size={20} />
+            <span>Generate Bill</span>
+          </button>
         </div>
       </div>
+
+      {showBillModal && <GenerateBillModal onClose={() => setShowBillModal(false)} />}
     </div>
   );
 };
