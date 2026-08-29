@@ -299,6 +299,20 @@ app.post('/api/bookings', async (req, res) => {
     const b = req.body;
     if (!b.check_in || !b.check_out || !b.property_id) return res.status(400).json({ error: 'check_in, check_out and property_id are required' });
     if (b.check_in >= b.check_out) return res.status(400).json({ error: 'check_out must be after check_in' });
+
+    const propertyIdInt = parseInt(b.property_id);
+    let conflictBookings;
+    if (useMongo) {
+      conflictBookings = await Booking.find({ property_id: propertyIdInt, booking_status: { $ne: 'cancelled' }, check_in: { $lt: b.check_out }, check_out: { $gt: b.check_in } }).lean();
+    } else {
+      conflictBookings = store.bookings.filter(bk => bk.property_id === propertyIdInt && bk.booking_status !== 'cancelled' && bk.check_in < b.check_out && bk.check_out > b.check_in);
+    }
+    if (conflictBookings.length > 0) {
+      const guestsList = useMongo ? await Guest.find().lean() : store.guests;
+      const conflicts = conflictBookings.map(bk => { const g = guestsList.find(gs => gs.id === bk.guest_id) || {}; return { id: bk.id, guest_name: `${g.first_name || ''} ${g.last_name || ''}`.trim(), check_in: bk.check_in, check_out: bk.check_out, channel: bk.channel }; });
+      return res.status(409).json({ error: 'Booking conflict detected', conflicts });
+    }
+
     let guestId = b.guest_id ? parseInt(b.guest_id) : null;
     if (!guestId && (b.first_name || b.phone)) {
       const key = [(b.first_name||'').trim().toLowerCase(), (b.last_name||'').trim().toLowerCase(), (b.phone||'').trim(), (b.email||'').trim().toLowerCase()].join('|');
