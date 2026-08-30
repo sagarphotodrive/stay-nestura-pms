@@ -696,6 +696,15 @@ app.delete('/api/expenses/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.post('/api/expenses/run-recurring', async (req, res) => {
+  try {
+    const before = useMongo ? await Expense.countDocuments() : store.expenses.length;
+    await processRecurringExpenses();
+    const after = useMongo ? await Expense.countDocuments() : store.expenses.length;
+    res.json({ message: 'Recurring expenses processed', generated: after - before });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // --- REPORTS ---
 app.get('/api/reports/dashboard', async (req, res) => {
   try {
@@ -1928,33 +1937,61 @@ app.post('/api/data/sync-to-code', (req, res) => {
 });
 
 // --- RECURRING EXPENSES ---
-// Auto-generates this month's copy of every expense marked is_recurring once its recurring_day
-// has arrived, so rent/salary/etc. don't need to be re-entered by hand each month.
+// Auto-generates a copy of every expense marked is_recurring once its recurring_day has
+// arrived each month, so rent/salary/etc. don't need to be re-entered by hand. If the job
+// didn't run for a few months (server was down, or the expense was just marked recurring
+// today with an old start date), it catches up and backfills every month that was missed
+// rather than only ever generating the current month.
+function addMonthsToPeriod(period, n) { // period: 'YYYY-MM'
+  const [y, m] = period.split('-').map(Number);
+  const d = new Date(y, m - 1 + n, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
 async function processRecurringExpenses() {
   const nowIST = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
   const todayStr = nowIST.toISOString().split('T')[0];
   const currentPeriod = todayStr.substring(0, 7); // YYYY-MM
   const todayDay = nowIST.getDate();
-  const lastDayOfMonth = new Date(nowIST.getFullYear(), nowIST.getMonth() + 1, 0).getDate();
 
   const templates = useMongo ? await Expense.find({ is_recurring: true }).lean() : store.expenses.filter(e => e.is_recurring);
 
   for (const t of templates) {
-    if (t.recurring_last_run === currentPeriod) continue;
     const day = t.recurring_day || new Date(t.expense_date).getDate();
-    const effectiveDay = Math.min(day, lastDayOfMonth); // clamp e.g. day 31 into a 30-day month
-    if (todayDay < effectiveDay) continue;
+    let period = t.recurring_last_run || t.expense_date.substring(0, 7);
+    const toGenerate = [];
 
-    const newExpData = { property_id: t.property_id, category: t.category, subcategory: t.subcategory, description: t.description, amount: t.amount, payment_method: t.payment_method, vendor_name: t.vendor_name, receipt_number: null, expense_date: todayStr, is_recurring: false, created_by: 'auto-recurring' };
-    if (useMongo) {
-      const eid = await nextId('expenses');
-      await Expense.create({ id: eid, ...newExpData });
-      await Expense.updateOne({ id: t.id }, { recurring_last_run: currentPeriod });
-    } else {
-      store.expenses.push({ id: _nextId(), ...newExpData, created_at: new Date().toISOString() });
-      t.recurring_last_run = currentPeriod;
+    // Walk forward one month at a time from the last generated period, catching up on
+    // every month that's fully elapsed, and including the current month once its day arrives.
+    while (true) {
+      const nextPeriod = addMonthsToPeriod(period, 1);
+      if (nextPeriod > currentPeriod) break;
+      const isCurrentPeriod = nextPeriod === currentPeriod;
+      const [py, pm] = nextPeriod.split('-').map(Number);
+      const lastDayOfPeriod = new Date(py, pm, 0).getDate();
+      const effectiveDay = Math.min(day, lastDayOfPeriod); // clamp e.g. day 31 into a 30-day month
+      if (isCurrentPeriod && todayDay < effectiveDay) break; // this month not due yet
+
+      toGenerate.push(`${nextPeriod}-${String(effectiveDay).padStart(2, '0')}`);
+      period = nextPeriod;
+      if (isCurrentPeriod) break;
     }
-    console.log(`[Recurring Expense] Generated "${t.description}" (Rs.${t.amount}) for ${todayStr}`);
+
+    if (toGenerate.length === 0) continue;
+
+    for (const dateStr of toGenerate) {
+      const newExpData = { property_id: t.property_id, category: t.category, subcategory: t.subcategory, description: t.description, amount: t.amount, payment_method: t.payment_method, vendor_name: t.vendor_name, receipt_number: null, expense_date: dateStr, is_recurring: false, created_by: 'auto-recurring' };
+      if (useMongo) {
+        const eid = await nextId('expenses');
+        await Expense.create({ id: eid, ...newExpData });
+      } else {
+        store.expenses.push({ id: _nextId(), ...newExpData, created_at: new Date().toISOString() });
+      }
+      console.log(`[Recurring Expense] Generated "${t.description}" (Rs.${t.amount}) for ${dateStr}`);
+    }
+
+    if (useMongo) { await Expense.updateOne({ id: t.id }, { recurring_last_run: period }); }
+    else { t.recurring_last_run = period; }
   }
 }
 
