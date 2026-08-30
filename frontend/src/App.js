@@ -1638,7 +1638,7 @@ const Expenses = () => {
   const [properties, setProperties] = useState([]);
   const [expFilterCategory, setExpFilterCategory] = useState('');
   const [expFilterProperty, setExpFilterProperty] = useState('');
-  const [expFilterDateFrom, setExpFilterDateFrom] = useState('');
+  const [expFilterDateFrom, setExpFilterDateFrom] = useState(() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return d.toISOString().split('T')[0]; });
   const [expFilterDateTo, setExpFilterDateTo] = useState('');
   const [expFilterPayment, setExpFilterPayment] = useState('');
   const emptyEForm = { property_id: '', category: 'cleaning', description: '', amount: '', payment_method: 'cash', vendor_name: '', expense_date: new Date().toISOString().split('T')[0], is_recurring: false, recurring_frequency: 'monthly', recurring_day: new Date().getDate() };
@@ -1656,6 +1656,7 @@ const Expenses = () => {
     if (expFilterDateFrom) filtered = filtered.filter(e => e.expense_date >= expFilterDateFrom);
     if (expFilterDateTo) filtered = filtered.filter(e => e.expense_date <= expFilterDateTo);
     if (expFilterPayment) filtered = filtered.filter(e => e.payment_method === expFilterPayment);
+    filtered.sort((a, b) => b.expense_date.localeCompare(a.expense_date) || (b.id - a.id));
     setExpenses(filtered);
   }, [expFilterCategory, expFilterProperty, expFilterDateFrom, expFilterDateTo, expFilterPayment, allExpenses]);
   useEffect(() => {
