@@ -1641,7 +1641,7 @@ const Expenses = () => {
   const [expFilterDateFrom, setExpFilterDateFrom] = useState('');
   const [expFilterDateTo, setExpFilterDateTo] = useState('');
   const [expFilterPayment, setExpFilterPayment] = useState('');
-  const emptyEForm = { property_id: '', category: 'cleaning', description: '', amount: '', payment_method: 'cash', vendor_name: '', expense_date: new Date().toISOString().split('T')[0] };
+  const emptyEForm = { property_id: '', category: 'cleaning', description: '', amount: '', payment_method: 'cash', vendor_name: '', expense_date: new Date().toISOString().split('T')[0], is_recurring: false, recurring_frequency: 'monthly', recurring_day: new Date().getDate() };
   const [eForm, setEForm] = useState(emptyEForm);
 
   useEffect(() => {
@@ -1687,14 +1687,14 @@ const Expenses = () => {
   const openEditExp = async (exp) => {
     try { const res = await api.get('/properties'); setProperties(res.data || []); } catch(e) {}
     setEditId(exp.id);
-    setEForm({ property_id: String(exp.property_id), category: exp.category, description: exp.description, amount: exp.amount, payment_method: exp.payment_method || 'cash', vendor_name: exp.vendor_name || '', expense_date: exp.expense_date });
+    setEForm({ property_id: String(exp.property_id), category: exp.category, description: exp.description, amount: exp.amount, payment_method: exp.payment_method || 'cash', vendor_name: exp.vendor_name || '', expense_date: exp.expense_date, is_recurring: !!exp.is_recurring, recurring_frequency: exp.recurring_frequency || 'monthly', recurring_day: exp.recurring_day || new Date(exp.expense_date).getDate() });
     setShowForm(true);
   };
 
   const handleExpense = async (e) => {
     e.preventDefault();
     try {
-      const data = { ...eForm, property_id: parseInt(eForm.property_id), amount: parseFloat(eForm.amount) };
+      const data = { ...eForm, property_id: parseInt(eForm.property_id), amount: parseFloat(eForm.amount), recurring_day: parseInt(eForm.recurring_day) || new Date(eForm.expense_date).getDate() };
       if (editId) { await api.put(`/expenses/${editId}`, data); } else { await api.post('/expenses', data); }
       setShowForm(false); setEForm(emptyEForm); setEditId(null); fetchExpenses();
     } catch (err) { console.error(err); }
@@ -1735,7 +1735,7 @@ const Expenses = () => {
             <form onSubmit={handleExpense} className="modal-form">
               <div className="form-row">
                 <div className="form-group"><label>Property *</label><select required value={eForm.property_id} onChange={e => setEForm({...eForm, property_id: e.target.value})}><option value="">Select property</option><option value="0">Common - Stay Nestura (All Properties)</option>{properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
-                <div className="form-group"><label>Category *</label><select value={eForm.category} onChange={e => setEForm({...eForm, category: e.target.value})}><option value="cleaning">Cleaning</option><option value="electricity">Electricity</option><option value="water">Water</option><option value="laundry">Laundry</option><option value="maintenance">Maintenance</option><option value="internet">Internet</option><option value="supplies">Supplies</option><option value="groceries">Groceries</option><option value="staff_salary">Staff Salary</option><option value="travel">Travel</option><option value="marketing">Marketing</option><option value="other">Other</option></select></div>
+                <div className="form-group"><label>Category *</label><select value={eForm.category} onChange={e => setEForm({...eForm, category: e.target.value})}><option value="rent">Rent</option><option value="cleaning">Cleaning</option><option value="electricity">Electricity</option><option value="water">Water</option><option value="laundry">Laundry</option><option value="maintenance">Maintenance</option><option value="internet">Internet</option><option value="supplies">Supplies</option><option value="groceries">Groceries</option><option value="staff_salary">Staff Salary</option><option value="travel">Travel</option><option value="marketing">Marketing</option><option value="other">Other</option></select></div>
               </div>
               <div className="form-group"><label>Description *</label><input required value={eForm.description} onChange={e => setEForm({...eForm, description: e.target.value})} placeholder="What is this expense for?"/></div>
               <div className="form-row">
@@ -1746,6 +1746,18 @@ const Expenses = () => {
                 <div className="form-group"><label>Payment Method</label><select value={eForm.payment_method} onChange={e => setEForm({...eForm, payment_method: e.target.value})}><option value="cash">Cash</option><option value="UPI">UPI</option><option value="bank_transfer">Bank Transfer</option><option value="card">Card</option></select></div>
                 <div className="form-group"><label>Vendor</label><input value={eForm.vendor_name} onChange={e => setEForm({...eForm, vendor_name: e.target.value})} placeholder="Vendor name"/></div>
               </div>
+              <div className="form-group">
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={eForm.is_recurring} onChange={e => setEForm({...eForm, is_recurring: e.target.checked})} />
+                  Repeat this expense automatically every month
+                </label>
+              </div>
+              {eForm.is_recurring && (
+                <div className="form-row">
+                  <div className="form-group"><label>Frequency</label><select value={eForm.recurring_frequency} onChange={e => setEForm({...eForm, recurring_frequency: e.target.value})}><option value="monthly">Monthly</option></select></div>
+                  <div className="form-group"><label>Day of month</label><input type="number" min="1" max="31" value={eForm.recurring_day} onChange={e => setEForm({...eForm, recurring_day: e.target.value})} placeholder="e.g. 5"/></div>
+                </div>
+              )}
               <div className="form-actions"><button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>Cancel</button><button type="submit" className="btn btn-primary">{editId ? 'Save Changes' : 'Add Expense'}</button></div>
             </form>
           </div>
@@ -1777,6 +1789,7 @@ const Expenses = () => {
           <label>Category</label>
           <select value={expFilterCategory} onChange={e => setExpFilterCategory(e.target.value)}>
             <option value="">All Categories</option>
+            <option value="rent">Rent</option>
             <option value="cleaning">Cleaning</option>
             <option value="electricity">Electricity</option>
             <option value="water">Water</option>
@@ -1840,7 +1853,7 @@ const Expenses = () => {
               <tr key={expense.id}>
                 <td className="expense-td-date">{format(new Date(expense.expense_date), 'MMM dd, yyyy')}</td>
                 <td className="expense-td-desc">{expense.description}</td>
-                <td><span className={`expense-cat-badge ${expense.category}`}>{expense.category.replace(/_/g, ' ')}</span></td>
+                <td><span className={`expense-cat-badge ${expense.category}`}>{expense.category.replace(/_/g, ' ')}</span>{expense.is_recurring && <span className="expense-cat-badge" title={`Repeats monthly on day ${expense.recurring_day || ''}`} style={{ marginLeft: '4px' }}>↻ recurring</span>}</td>
                 <td className="expense-td-prop">{expense.property_id === 0 ? 'Common' : expense.property_name || '-'}</td>
                 <td className="expense-td-method">{expense.payment_method}</td>
                 <td className="expense-td-amount">₹{parseFloat(expense.amount).toLocaleString()}</td>

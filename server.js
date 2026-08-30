@@ -10,6 +10,7 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const { Server } = require('socket.io');
+const cron = require('node-cron');
 require('dotenv').config();
 
 // Import in-memory data store (fallback when no MongoDB)
@@ -623,7 +624,7 @@ app.get('/api/expenses/summary', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 app.get('/api/expenses/categories', (req, res) => {
-  res.json(['laundry','electricity','water','staff_salary','cleaning','maintenance','internet','supplies','groceries','travel','marketing','other']);
+  res.json(['rent','laundry','electricity','water','staff_salary','cleaning','maintenance','internet','supplies','groceries','travel','marketing','other']);
 });
 app.get('/api/expenses', async (req, res) => {
   try {
@@ -647,7 +648,9 @@ app.get('/api/expenses', async (req, res) => {
 app.post('/api/expenses', async (req, res) => {
   try {
     const b = req.body;
-    const expData = { property_id: parseInt(b.property_id), category: b.category, subcategory: b.subcategory, description: b.description, amount: parseFloat(b.amount) || 0, payment_method: b.payment_method || 'cash', vendor_name: b.vendor_name, receipt_number: b.receipt_number, expense_date: b.expense_date || new Date().toISOString().split('T')[0], is_recurring: b.is_recurring || false, recurring_frequency: b.recurring_frequency, created_by: 'demo-001' };
+    const expenseDate = b.expense_date || new Date().toISOString().split('T')[0];
+    const isRecurring = !!b.is_recurring;
+    const expData = { property_id: parseInt(b.property_id), category: b.category, subcategory: b.subcategory, description: b.description, amount: parseFloat(b.amount) || 0, payment_method: b.payment_method || 'cash', vendor_name: b.vendor_name, receipt_number: b.receipt_number, expense_date: expenseDate, is_recurring: isRecurring, recurring_frequency: isRecurring ? (b.recurring_frequency || 'monthly') : undefined, recurring_day: isRecurring ? (parseInt(b.recurring_day) || new Date(expenseDate).getDate()) : undefined, recurring_last_run: isRecurring ? expenseDate.substring(0, 7) : undefined, created_by: 'demo-001' };
     if (useMongo) {
       const eid = await nextId('expenses');
       const exp = await Expense.create({ id: eid, ...expData });
@@ -1923,6 +1926,47 @@ app.post('/api/data/sync-to-code', (req, res) => {
     res.status(500).json({ error: 'Sync failed: ' + err.message });
   }
 });
+
+// --- RECURRING EXPENSES ---
+// Auto-generates this month's copy of every expense marked is_recurring once its recurring_day
+// has arrived, so rent/salary/etc. don't need to be re-entered by hand each month.
+async function processRecurringExpenses() {
+  const nowIST = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const todayStr = nowIST.toISOString().split('T')[0];
+  const currentPeriod = todayStr.substring(0, 7); // YYYY-MM
+  const todayDay = nowIST.getDate();
+  const lastDayOfMonth = new Date(nowIST.getFullYear(), nowIST.getMonth() + 1, 0).getDate();
+
+  const templates = useMongo ? await Expense.find({ is_recurring: true }).lean() : store.expenses.filter(e => e.is_recurring);
+
+  for (const t of templates) {
+    if (t.recurring_last_run === currentPeriod) continue;
+    const day = t.recurring_day || new Date(t.expense_date).getDate();
+    const effectiveDay = Math.min(day, lastDayOfMonth); // clamp e.g. day 31 into a 30-day month
+    if (todayDay < effectiveDay) continue;
+
+    const newExpData = { property_id: t.property_id, category: t.category, subcategory: t.subcategory, description: t.description, amount: t.amount, payment_method: t.payment_method, vendor_name: t.vendor_name, receipt_number: null, expense_date: todayStr, is_recurring: false, created_by: 'auto-recurring' };
+    if (useMongo) {
+      const eid = await nextId('expenses');
+      await Expense.create({ id: eid, ...newExpData });
+      await Expense.updateOne({ id: t.id }, { recurring_last_run: currentPeriod });
+    } else {
+      store.expenses.push({ id: _nextId(), ...newExpData, created_at: new Date().toISOString() });
+      t.recurring_last_run = currentPeriod;
+    }
+    console.log(`[Recurring Expense] Generated "${t.description}" (Rs.${t.amount}) for ${todayStr}`);
+  }
+}
+
+// Check once a day for due recurring expenses
+cron.schedule('0 6 * * *', () => {
+  processRecurringExpenses().catch(err => console.error('Recurring expense job failed:', err));
+}, { timezone: 'Asia/Kolkata' });
+
+// Also run shortly after boot in case the server was down when today's job would have fired
+setTimeout(() => {
+  processRecurringExpenses().catch(err => console.error('Recurring expense startup check failed:', err));
+}, 10000);
 
 // 404 handler
 app.use((req, res) => {

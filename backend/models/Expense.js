@@ -13,6 +13,8 @@ const expenseSchema = new mongoose.Schema({
   expense_date: String,
   is_recurring: { type: Boolean, default: false },
   recurring_frequency: String,
+  recurring_day: Number,
+  recurring_last_run: String,
   created_by: String,
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
