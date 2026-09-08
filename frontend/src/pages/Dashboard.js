@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   IndianRupee, BarChart3,
   Plus, Calendar, LogOut,
-  UserCheck, Users,
+  UserCheck, Users, Clock,
   X, FileText
 } from 'lucide-react';
 import { api, socket } from '../lib/api';
@@ -115,6 +115,16 @@ const Dashboard = () => {
       </div>
 
       <div className="stats-grid">
+        {(stats?.pending_requests || 0) > 0 && (
+          <Link to="/bookings?filter=pending" style={{ textDecoration: 'none', color: 'inherit' }}>
+            <StatCard
+              title="Pending Requests"
+              value={stats.pending_requests}
+              icon={Clock}
+              color="#d97706"
+            />
+          </Link>
+        )}
         <StatCard
           title="Today's Check-ins"
           value={stats?.today?.today_checkins || 0}

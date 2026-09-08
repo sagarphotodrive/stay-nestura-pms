@@ -35,6 +35,7 @@ async function nextId(collection) {
 
 const { validateBookingAmounts } = require('./backend/utils/bookingMath');
 const { computeDueDates } = require('./backend/utils/recurringExpenses');
+const { hasBookingConflict, getUnavailableRanges } = require('./backend/utils/availability');
 
 // Import auth route (has demo login)
 const authRoutes = require('./backend/routes/auth');
@@ -43,6 +44,7 @@ const authRoutes = require('./backend/routes/auth');
 // endpoints specifically to slow down credential-stuffing/brute-force attempts.
 const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests, please try again later.' } });
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many attempts, please try again later.' } });
+const publicBookingLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 8, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many booking requests from this device. Please try again later or contact us directly.' } });
 
 const app = express();
 const server = http.createServer(app);
@@ -89,7 +91,7 @@ app.get('/api/properties', async (req, res) => {
   try {
     if (useMongo) {
       const props = await Property.find({ is_active: true }).lean();
-      const bookings = await Booking.find({ booking_status: { $ne: 'cancelled' } }).lean();
+      const bookings = await Booking.find({ booking_status: { $nin: ['cancelled', 'pending'] } }).lean();
       const enriched = props.map(p => {
         const bks = bookings.filter(b => b.property_id === p.id);
         return { ...p, current_bookings: bks.length, month_revenue: bks.reduce((s,b) => s + (b.net_amount||0), 0) };
@@ -98,7 +100,7 @@ app.get('/api/properties', async (req, res) => {
     }
     const active = store.properties.filter(p => p.is_active !== false);
     const enriched = active.map(p => {
-      const bks = store.bookings.filter(b => b.property_id === p.id && b.booking_status !== 'cancelled');
+      const bks = store.bookings.filter(b => b.property_id === p.id && b.booking_status !== 'cancelled' && b.booking_status !== 'pending');
       return { ...p, current_bookings: bks.length, month_revenue: bks.reduce((s,b) => s + (b.net_amount||0), 0) };
     });
     res.json(enriched);
@@ -243,7 +245,7 @@ app.get('/api/bookings/stats/overview', async (req, res) => {
       allBks = store.bookings;
       allProps = store.properties.filter(p => p.is_active);
     }
-    let bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.check_in >= startDate && b.check_in <= endDate);
+    let bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.booking_status !== 'pending' && b.check_in >= startDate && b.check_in <= endDate);
     let cancelledBks = allBks.filter(b => b.booking_status === 'cancelled' && b.check_in >= startDate && b.check_in <= endDate);
     if (propFilter) { bks = bks.filter(b => b.property_id === propFilter); cancelledBks = cancelledBks.filter(b => b.property_id === propFilter); }
     const props = propFilter ? allProps.filter(p => p.id === propFilter) : allProps;
@@ -380,6 +382,7 @@ app.patch('/api/bookings/:id/status', async (req, res) => {
   try {
     const newStatus = (req.body.status || '').replace(/_/g, '-');
     const validTransitions = {
+      'pending': ['confirmed', 'cancelled'],
       'confirmed': ['checked-in', 'cancelled'],
       'checked-in': ['checked-out', 'confirmed', 'cancelled'],
       'checked-out': ['checked-in'],
@@ -395,6 +398,7 @@ app.patch('/api/bookings/:id/status', async (req, res) => {
       return res.status(400).json({ error: `Cannot change status from '${current.booking_status}' to '${newStatus}'` });
     }
     const update = { booking_status: newStatus };
+    if (newStatus === 'confirmed' && current.booking_status === 'pending') update.confirmed_at = new Date().toISOString();
     if (newStatus === 'checked-in') update.actual_check_in = new Date().toISOString();
     if (newStatus === 'checked-out') update.actual_check_out = new Date().toISOString();
     if (newStatus === 'cancelled') { update.cancelled_at = new Date().toISOString(); update.cancellation_reason = req.body.cancellation_reason; }
@@ -481,6 +485,112 @@ app.post('/api/bookings/:id/cancel', async (req, res) => {
     if (!b) return res.status(404).json({ error: 'Not found' });
     b.booking_status = 'cancelled'; b.cancelled_at = new Date().toISOString(); b.cancellation_reason = req.body.cancellation_reason || 'Cancelled';
     res.json(b);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// --- PUBLIC BOOKING WIDGET (no auth — guest-facing) ---
+// Read-only, safe-to-expose endpoints for the direct-booking page, plus booking creation.
+// Submissions land as booking_status 'pending' for staff to approve/decline in the admin
+// Bookings page — they still block the dates (see backend/utils/availability.js) so two
+// guests can't request the same dates while a request is awaiting review.
+const toPublicProperty = (p) => ({
+  id: p.id, name: p.name, property_type: p.property_type, address: p.address, city: p.city,
+  state: p.state, pincode: p.pincode, total_rooms: p.total_rooms, max_guests: p.max_guests,
+  base_price: p.base_price, description: p.description, amenities: p.amenities, images: p.images,
+  latitude: p.latitude, longitude: p.longitude, google_maps_link: p.google_maps_link,
+});
+
+app.get('/api/public/properties', async (req, res) => {
+  try {
+    const props = useMongo
+      ? await Property.find({ is_active: true }).lean()
+      : store.properties.filter(p => p.is_active !== false);
+    res.json(props.map(toPublicProperty));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/public/properties/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const prop = useMongo
+      ? await Property.findOne({ id, is_active: true }).lean()
+      : store.properties.find(p => p.id === id && p.is_active !== false);
+    if (!prop) return res.status(404).json({ error: 'Not found' });
+    res.json(toPublicProperty(prop));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/public/properties/:id/availability', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { start, end } = req.query;
+    const bookings = useMongo ? await Booking.find({ property_id: id }).lean() : store.bookings.filter(b => b.property_id === id);
+    let avail = useMongo ? await Availability.find({ property_id: id }).lean() : store.availability.filter(a => a.property_id === id);
+    if (start) avail = avail.filter(a => a.date >= start);
+    if (end) avail = avail.filter(a => a.date <= end);
+    res.json(getUnavailableRanges(bookings, avail));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/public/bookings', publicBookingLimiter, async (req, res) => {
+  try {
+    const b = req.body;
+    if (!b.property_id || !b.check_in || !b.check_out) return res.status(400).json({ error: 'property_id, check_in and check_out are required' });
+    if (b.check_in >= b.check_out) return res.status(400).json({ error: 'check_out must be after check_in' });
+    if (!(b.first_name || '').trim() || !(b.phone || '').trim()) return res.status(400).json({ error: 'Guest name and phone are required' });
+
+    const propertyId = parseInt(b.property_id);
+    const property = useMongo
+      ? await Property.findOne({ id: propertyId, is_active: true }).lean()
+      : store.properties.find(p => p.id === propertyId && p.is_active !== false);
+    if (!property) return res.status(404).json({ error: 'Property not found' });
+
+    const existingBks = useMongo ? await Booking.find({ property_id: propertyId }).lean() : store.bookings.filter(bk => bk.property_id === propertyId);
+    if (hasBookingConflict(existingBks, b.check_in, b.check_out)) {
+      return res.status(409).json({ error: 'DATES_UNAVAILABLE', message: 'These dates are no longer available. Please choose different dates.' });
+    }
+
+    // The server computes the price from the property's current rate — a public,
+    // unauthenticated endpoint must never trust a client-supplied amount.
+    const nights = Math.ceil((new Date(b.check_out) - new Date(b.check_in)) / 86400000);
+    const nightlyRate = property.base_price || 0;
+    const grossAmount = nightlyRate * nights;
+    const amountError = validateBookingAmounts({ check_in: b.check_in, check_out: b.check_out, nightly_rate: nightlyRate, gross_amount: grossAmount, cleaning_fee: 0, service_fee: 0, taxes: 0 });
+    if (amountError) return res.status(400).json(amountError);
+
+    // Find or create the guest by name/phone/email — same de-dupe key POST /api/bookings uses.
+    const key = [(b.first_name||'').trim().toLowerCase(), (b.last_name||'').trim().toLowerCase(), (b.phone||'').trim(), (b.email||'').trim().toLowerCase()].join('|');
+    let guest;
+    if (useMongo) {
+      const allGuests = await Guest.find().lean();
+      guest = allGuests.find(g => [(g.first_name||'').trim().toLowerCase(), (g.last_name||'').trim().toLowerCase(), (g.phone||'').trim(), (g.email||'').trim().toLowerCase()].join('|') === key);
+      if (!guest) {
+        const gid = await nextId('guests');
+        guest = (await Guest.create({ id: gid, first_name: (b.first_name||'').trim(), last_name: (b.last_name||'').trim(), email: (b.email||'').trim(), phone: (b.phone||'').trim(), nationality: 'Indian' })).toObject();
+      }
+    } else {
+      guest = store.guests.find(g => [(g.first_name||'').trim().toLowerCase(), (g.last_name||'').trim().toLowerCase(), (g.phone||'').trim(), (g.email||'').trim().toLowerCase()].join('|') === key);
+      if (!guest) {
+        guest = { id: _nextId(), first_name: (b.first_name||'').trim(), last_name: (b.last_name||'').trim(), email: (b.email||'').trim(), phone: (b.phone||'').trim(), id_proof_type: null, id_proof_number: null, id_proof_encrypted: null, address: '', date_of_birth: null, nationality: 'Indian', total_stays: 0, total_spent: 0, lifetime_value: 0, preferences: '', notes: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+        store.guests.push(guest);
+      }
+    }
+
+    const bookingData = { property_id: propertyId, guest_id: guest.id, channel: 'direct', check_in: b.check_in, check_out: b.check_out, adults: b.adults || 1, children: b.children || 0, infants: 0, nightly_rate: nightlyRate, subtotal: grossAmount, cleaning_fee: 0, service_fee: 0, taxes: 0, gross_amount: grossAmount, commission_percent: 0, commission_amount: 0, net_amount: grossAmount, currency: 'INR', payment_status: 'pending', payment_method: null, paid_amount: 0, pending_amount: grossAmount, booking_status: 'pending', guest_message: '', special_requests: (b.special_requests || '').trim(), check_in_time: '4:00 PM', check_out_time: '2:00 PM', confirmed_at: null };
+
+    let booking;
+    if (useMongo) {
+      const bid = await nextId('bookings');
+      booking = (await Booking.create({ id: bid, ...bookingData })).toObject();
+    } else {
+      booking = { id: _nextId(), ...bookingData, actual_check_in: null, actual_check_out: null, cancelled_at: null, cancellation_reason: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+      store.bookings.push(booking);
+    }
+
+    const io = req.app.get('io');
+    if (io) io.emit('new-booking-request', { id: booking.id, property_name: property.name, guest_name: `${guest.first_name} ${guest.last_name}`.trim(), check_in: booking.check_in, check_out: booking.check_out });
+
+    res.status(201).json({ id: booking.id, property_name: property.name, check_in: booking.check_in, check_out: booking.check_out, nights, nightly_rate: nightlyRate, gross_amount: grossAmount, booking_status: booking.booking_status });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -704,7 +814,7 @@ app.get('/api/reports/dashboard', async (req, res) => {
   try {
     const today = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })).toISOString().split('T')[0];
     const allBks = useMongo ? await Booking.find().lean() : store.bookings;
-    const bks = allBks.filter(b => b.booking_status !== 'cancelled');
+    const bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.booking_status !== 'pending');
     const props = useMongo ? await Property.find({ is_active: true }).lean() : store.properties.filter(p => p.is_active);
     const guests = useMongo ? await Guest.find().lean() : store.guests;
     const yr = parseInt(today.substring(0, 4)), mn = parseInt(today.substring(5, 7));
@@ -763,12 +873,15 @@ app.get('/api/reports/dashboard', async (req, res) => {
 
     // Pending action count
     const pendingActionCount = todayCheckins.length + todayCheckouts.length + pending.length;
+    // Direct-booking requests awaiting staff approval (separate from "payment pending")
+    const pendingRequests = allBks.filter(b => b.booking_status === 'pending').length;
 
     res.json({
       today: { today_checkins: todayCheckins.length, today_checkouts: todayCheckouts.length, currently_staying: currentlyStaying.length },
       month: { total_bookings: monthRevBks.length, gross_revenue: monthGross, net_revenue: monthNet },
       pacing: { current_month: monthGross, prev_month: prevGross, delta_pct: delta, projected_month_end: projected, days_elapsed: dayOfMonth, days_in_month: daysInMonth },
       pending_action_count: pendingActionCount,
+      pending_requests: pendingRequests,
       occupancy,
       pending,
       upcoming
@@ -783,7 +896,7 @@ app.get('/api/reports/profit-loss', async (req, res) => {
     const endDate = new Date(year, month, 0).toISOString().split('T')[0];
     const daysInMonth = new Date(year, month, 0).getDate();
     const allBks = useMongo ? await Booking.find().lean() : store.bookings;
-    let bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.check_in >= startDate && b.check_in <= endDate);
+    let bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.booking_status !== 'pending' && b.check_in >= startDate && b.check_in <= endDate);
     if (propFilter) bks = bks.filter(b => b.property_id === propFilter);
     const allExps = useMongo ? await Expense.find().lean() : store.expenses;
     let monthExps = allExps.filter(e => e.expense_date >= startDate && e.expense_date <= endDate);
@@ -814,7 +927,7 @@ app.get('/api/reports/daily-brief', async (req, res) => {
     const today = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })).toISOString().split('T')[0];
     const tomorrow = new Date(new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })).getTime()+86400000).toISOString().split('T')[0];
     const allBks = useMongo ? await Booking.find().lean() : store.bookings;
-    const bks = allBks.filter(b => b.booking_status !== 'cancelled');
+    const bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.booking_status !== 'pending');
     const props = useMongo ? await Property.find().lean() : store.properties;
     const guests = useMongo ? await Guest.find().lean() : store.guests;
     const enrich = b => { const p = props.find(pr => pr.id === b.property_id) || {}; const g = guests.find(gs => gs.id === b.guest_id) || {}; return { ...b, property_name: p.name, address: p.address, google_maps_link: p.google_maps_link, first_name: g.first_name, last_name: g.last_name, phone: g.phone, guest_name: `${g.first_name || ''} ${g.last_name || ''}`.trim(), guests: (b.adults||0)+(b.children||0) }; };
@@ -831,7 +944,7 @@ app.get('/api/reports/revenue', async (req, res) => {
     const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
     const endDate = new Date(year, month, 0).toISOString().split('T')[0];
     const allBks = useMongo ? await Booking.find().lean() : store.bookings;
-    let bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.check_in >= startDate && b.check_in <= endDate);
+    let bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.booking_status !== 'pending' && b.check_in >= startDate && b.check_in <= endDate);
     if (propFilter) bks = bks.filter(b => b.property_id === propFilter);
     const props = useMongo ? await Property.find().lean() : store.properties;
     const byChannel = {}; bks.forEach(b => { const ch = b.channel || 'unknown'; if (!byChannel[ch]) byChannel[ch] = { channel: ch, bookings: 0, gross: 0, net: 0 }; byChannel[ch].bookings++; byChannel[ch].gross += (b.gross_amount||0); byChannel[ch].net += (b.net_amount||0); });
@@ -850,7 +963,7 @@ app.get('/api/reports/kpi-metrics', async (req, res) => {
     const endDate = new Date(year, month, 0).toISOString().split('T')[0];
     const daysInMonth = new Date(year, month, 0).getDate();
     const allBks = useMongo ? await Booking.find().lean() : store.bookings;
-    let bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.check_in >= startDate && b.check_in <= endDate);
+    let bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.booking_status !== 'pending' && b.check_in >= startDate && b.check_in <= endDate);
     if (propFilter) bks = bks.filter(b => b.property_id === propFilter);
     const allExps = useMongo ? await Expense.find().lean() : store.expenses;
     let monthExps = allExps.filter(e => e.expense_date >= startDate && e.expense_date <= endDate);
@@ -908,7 +1021,7 @@ app.get('/api/reports/channel-profitability', async (req, res) => {
     const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
     const endDate = new Date(year, month, 0).toISOString().split('T')[0];
     const allBks = useMongo ? await Booking.find().lean() : store.bookings;
-    let bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.check_in >= startDate && b.check_in <= endDate);
+    let bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.booking_status !== 'pending' && b.check_in >= startDate && b.check_in <= endDate);
     if (propFilter) bks = bks.filter(b => b.property_id === propFilter);
     const commissionRates = { direct: 0, airbnb: 0.15, 'booking.com': 0.15, agoda: 0.18, makemytrip: 0.20, goibibo: 0.20 };
     const channels = {};
@@ -943,7 +1056,7 @@ app.get('/api/reports/guest-analytics', async (req, res) => {
     const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
     const endDate = new Date(year, month, 0).toISOString().split('T')[0];
     const allBks = useMongo ? await Booking.find().lean() : store.bookings;
-    let monthBks = allBks.filter(b => b.booking_status !== 'cancelled' && b.check_in >= startDate && b.check_in <= endDate);
+    let monthBks = allBks.filter(b => b.booking_status !== 'cancelled' && b.booking_status !== 'pending' && b.check_in >= startDate && b.check_in <= endDate);
     if (propFilter) monthBks = monthBks.filter(b => b.property_id === propFilter);
     const monthGuestIds = new Set(monthBks.map(b => b.guest_id));
     const allGs = useMongo ? await Guest.find().lean() : store.guests;
@@ -961,7 +1074,7 @@ app.get('/api/reports/payment-summary', async (req, res) => {
     const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
     const endDate = new Date(year, month, 0).toISOString().split('T')[0];
     const allBks = useMongo ? await Booking.find().lean() : store.bookings;
-    let bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.check_in >= startDate && b.check_in <= endDate);
+    let bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.booking_status !== 'pending' && b.check_in >= startDate && b.check_in <= endDate);
     if (propFilter) bks = bks.filter(b => b.property_id === propFilter);
     const paid = bks.filter(b => b.payment_status === 'paid');
     const pending = bks.filter(b => b.payment_status === 'pending');
@@ -982,7 +1095,7 @@ app.get('/api/reports/adr', async (req, res) => {
     const startDate = `${year}-${String(month).padStart(2,'0')}-01`;
     const endDate = new Date(year, month, 0).toISOString().split('T')[0];
     const allBks = useMongo ? await Booking.find().lean() : store.bookings;
-    let bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.check_in >= startDate && b.check_in <= endDate);
+    let bks = allBks.filter(b => b.booking_status !== 'cancelled' && b.booking_status !== 'pending' && b.check_in >= startDate && b.check_in <= endDate);
     if (propFilter) bks = bks.filter(b => b.property_id === propFilter);
     const activeProps = useMongo ? await Property.find({ is_active: true }).lean() : store.properties.filter(p => p.is_active);
     const filteredProps = propFilter ? activeProps.filter(p => p.id === propFilter) : activeProps;

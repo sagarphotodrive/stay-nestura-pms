@@ -13,6 +13,7 @@ const Guests = React.lazy(() => import('./pages/Guests'));
 const Expenses = React.lazy(() => import('./pages/Expenses'));
 const Reports = React.lazy(() => import('./pages/Reports'));
 const SettingsPage = React.lazy(() => import('./pages/Settings'));
+const PublicBooking = React.lazy(() => import('./pages/PublicBooking'));
 
 // Main Layout Component
 const Layout = () => {
@@ -72,7 +73,15 @@ function App() {
   return (
     <Router basename="/app">
       <AuthProvider>
-        <Layout />
+        <Suspense fallback={<LoadingSpinner />}>
+          <Routes>
+            {/* Public, no-login booking widget — rendered without the admin Sidebar/Layout
+                chrome so it can be linked or iframed from the property's own website. */}
+            <Route path="/book" element={<PublicBooking />} />
+            <Route path="/book/:propertyId" element={<PublicBooking />} />
+            <Route path="/*" element={<Layout />} />
+          </Routes>
+        </Suspense>
       </AuthProvider>
     </Router>
   );

@@ -38,6 +38,11 @@ const Bookings = () => {
     const co = searchParams.get('check_out');
     const rate = searchParams.get('nightly_rate');
     const action = searchParams.get('action');
+    const filterParam = searchParams.get('filter');
+    if (filterParam) {
+      setFilter(filterParam);
+      setSearchParams({}, { replace: true });
+    }
     if (pid && ci) {
       setBForm(prev => ({ ...prev, property_id: pid, check_in: ci, check_out: co || '', nightly_rate: rate || '' }));
       api.get('/properties').then(res => {
@@ -125,6 +130,8 @@ const Bookings = () => {
     setBForm({ property_id: String(b.property_id), first_name: b.first_name || '', last_name: b.last_name || '', phone: b.phone || '', email: b.email || '', check_in: b.check_in, check_out: b.check_out, adults: b.adults || 1, children: b.children || 0, nightly_rate: b.nightly_rate || '', final_amount: (b.gross_amount != null ? b.gross_amount : '') , channel: b.channel || 'direct', payment_method: b.payment_method || 'UPI', special_requests: b.special_requests || '', advance_paid: b.paid_amount || 0 });
     setShowForm(true);
   };
+
+  const pendingCount = allBookings.filter(b => b.booking_status === 'pending').length;
 
   const bNights = computeNights(bForm.check_in, bForm.check_out);
   const bPerDayPaise = toPaise(bForm.nightly_rate);
@@ -306,6 +313,9 @@ const Bookings = () => {
 
       <div className="filters">
         <button className={`filter-btn ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>All</button>
+        <button className={`filter-btn ${filter === 'pending' ? 'active' : ''}`} onClick={() => setFilter('pending')}>
+          Pending{pendingCount > 0 ? ` (${pendingCount})` : ''}
+        </button>
         <button className={`filter-btn ${filter === 'confirmed' ? 'active' : ''}`} onClick={() => setFilter('confirmed')}>Confirmed</button>
         <button className={`filter-btn ${filter === 'checked-in' ? 'active' : ''}`} onClick={() => setFilter('checked-in')}>Checked In</button>
         <button className={`filter-btn ${filter === 'checked-out' ? 'active' : ''}`} onClick={() => setFilter('checked-out')}>Checked Out</button>
@@ -386,13 +396,19 @@ const Bookings = () => {
               </span>
               <button className="btn btn-sm btn-edit" onClick={() => openEdit(booking)}><Edit3 size={14} /> Edit</button>
               <button className="btn btn-sm btn-secondary" onClick={() => generateBookingBillPDF(booking)} title="Download PDF bill"><FileText size={14} /> Bill</button>
-              {booking.booking_status !== 'cancelled' && (
+              {booking.booking_status === 'pending' && (
+                <>
+                  <button className="btn btn-sm btn-success" onClick={() => updateStatus(booking.id, 'confirmed')}><CheckCircle size={14} /> Confirm Booking</button>
+                  <button className="btn btn-sm btn-danger" onClick={() => { if (window.confirm('Decline this booking request?')) updateStatus(booking.id, 'cancelled'); }}>Decline</button>
+                </>
+              )}
+              {booking.booking_status !== 'cancelled' && booking.booking_status !== 'pending' && (
                 <>
                   <button className="btn btn-sm btn-whatsapp" onClick={() => openWhatsApp(booking)} title="Send via WhatsApp">WhatsApp</button>
                   <button className="btn btn-sm btn-secondary" onClick={() => copyBookingMessage(booking)} title="Copy message"><Copy size={14} /></button>
                 </>
               )}
-              {(booking.pending_amount || 0) > 0 && booking.booking_status !== 'cancelled' && (
+              {(booking.pending_amount || 0) > 0 && booking.booking_status !== 'cancelled' && booking.booking_status !== 'pending' && (
                 <button className="btn btn-sm btn-success" onClick={() => recordPayment(booking)}><IndianRupee size={14} /> Record Payment</button>
               )}
               {booking.booking_status === 'confirmed' && (
@@ -413,7 +429,7 @@ const Bookings = () => {
                   <button className="btn btn-sm btn-danger" onClick={async () => { if(window.confirm('Permanently delete this cancelled booking? This cannot be undone.')) { try { await api.delete(`/bookings/${booking.id}`); fetchBookings(); } catch(err) { alert('Failed to delete'); } } }}><Trash2 size={14} /> Delete</button>
                 </>
               )}
-              {booking.booking_status !== 'cancelled' && (
+              {booking.booking_status !== 'cancelled' && booking.booking_status !== 'pending' && (
                 <button className="btn btn-sm btn-danger" onClick={() => { if(window.confirm('Cancel this booking?')) updateStatus(booking.id, 'cancelled'); }}>Cancel</button>
               )}
             </div>
