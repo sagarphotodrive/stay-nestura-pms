@@ -2,13 +2,13 @@ const mongoose = require('mongoose');
 
 const availabilitySchema = new mongoose.Schema({
   id: { type: Number, unique: true, index: true },
-  property_id: { type: Number, index: true },
-  date: { type: String, index: true },
-  rooms_available: { type: Number, default: 1 },
+  property_id: { type: Number, required: true, index: true },
+  date: { type: String, required: true, index: true },
+  rooms_available: { type: Number, default: 1, min: 0 },
   is_blocked: { type: Boolean, default: false },
   blocked_reason: String,
-  min_stay: { type: Number, default: 1 },
-  max_stay: { type: Number, default: 30 },
+  min_stay: { type: Number, default: 1, min: 1 },
+  max_stay: { type: Number, default: 30, min: 1 },
   closed_to_arrival: { type: Boolean, default: false },
   closed_to_departure: { type: Boolean, default: false },
 }, { timestamps: { updatedAt: 'updated_at', createdAt: false } });

@@ -12,9 +12,9 @@ const guestSchema = new mongoose.Schema({
   address: String,
   date_of_birth: Date,
   nationality: { type: String, default: 'Indian' },
-  total_stays: { type: Number, default: 0 },
-  total_spent: { type: Number, default: 0 },
-  lifetime_value: { type: Number, default: 0 },
+  total_stays: { type: Number, default: 0, min: 0 },
+  total_spent: { type: Number, default: 0, min: 0 },
+  lifetime_value: { type: Number, default: 0, min: 0 },
   preferences: String,
   notes: String,
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
