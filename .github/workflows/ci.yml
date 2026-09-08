@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main, Development]
+  pull_request:
+    branches: [main, Development]
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm test
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      # No frontend test files exist yet — this keeps CI from failing on an empty suite
+      # while still running whatever gets added later.
+      - run: npx react-scripts test --watchAll=false --passWithNoTests
+        env:
+          CI: true
+      # Deliberately not CI=true here: this project currently has ESLint warnings
+      # (unused vars, exhaustive-deps) that CI=true would promote to build failures.
+      - run: npx react-scripts build

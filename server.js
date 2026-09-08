@@ -11,7 +11,14 @@ const path = require('path');
 const fs = require('fs');
 const { Server } = require('socket.io');
 const cron = require('node-cron');
+const rateLimit = require('express-rate-limit');
 require('dotenv').config();
+
+const { initErrorTracking, setupExpressErrorHandler, captureException } = require('./backend/config/errorTracking');
+initErrorTracking();
+
+process.on('unhandledRejection', (err) => { console.error('Unhandled promise rejection:', err); captureException(err); });
+process.on('uncaughtException', (err) => { console.error('Uncaught exception:', err); captureException(err); process.exit(1); });
 
 // Import in-memory data store (fallback when no MongoDB)
 const { store } = require('./backend/config/database');
@@ -19,38 +26,23 @@ const { store } = require('./backend/config/database');
 // MongoDB support
 const { connectDB, isMongoConnected } = require('./backend/config/mongoose');
 const { Property, Guest, Booking, Expense, ChannelAccount, User, Availability, SyncLog, Counter } = require('./backend/models');
+const { EXPENSE_CATEGORIES, BOOKING_STATUSES, PAYMENT_STATUSES } = require('./backend/config/constants');
 
 // Helper: get next auto-increment ID for MongoDB
 async function nextId(collection) {
   return Counter.getNextId(collection);
 }
 
-// Currency-safe money helpers (paise-based to avoid float drift) + booking amount validation.
-// Rule enforced everywhere (frontend, backend, invoice): perDayAmount x numberOfDays == finalAmount.
-const toPaiseServer = (v) => Math.round((parseFloat(v) || 0) * 100);
-function validateBookingAmounts({ check_in, check_out, nightly_rate, gross_amount, cleaning_fee, service_fee, taxes }) {
-  const nights = Math.ceil((new Date(check_out) - new Date(check_in)) / 86400000);
-  if (!(nights > 0)) return { error: 'INVALID_NIGHTS', message: 'Number of days must be greater than zero.' };
-  const perDay = parseFloat(nightly_rate);
-  const final = parseFloat(gross_amount);
-  if (nightly_rate == null || isNaN(perDay) || perDay <= 0) return { error: 'INVALID_AMOUNT', message: 'Per-day amount must be greater than zero.' };
-  if (gross_amount == null || isNaN(final) || final <= 0) return { error: 'INVALID_AMOUNT', message: 'Final amount must be greater than zero.' };
-  const extrasPaise = toPaiseServer(cleaning_fee) + toPaiseServer(service_fee) + toPaiseServer(taxes);
-  const expectedPaise = toPaiseServer(perDay) * nights + extrasPaise;
-  const finalPaise = toPaiseServer(final);
-  if (expectedPaise !== finalPaise) {
-    return {
-      error: 'AMOUNT_MISMATCH',
-      message: 'Per-day amount multiplied by number of days does not match the final amount.',
-      expected: expectedPaise / 100,
-      provided: finalPaise / 100
-    };
-  }
-  return null;
-}
+const { validateBookingAmounts } = require('./backend/utils/bookingMath');
+const { computeDueDates } = require('./backend/utils/recurringExpenses');
 
 // Import auth route (has demo login)
 const authRoutes = require('./backend/routes/auth');
+
+// Rate limiting — a looser cap across all API traffic, plus a tighter one on auth
+// endpoints specifically to slow down credential-stuffing/brute-force attempts.
+const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests, please try again later.' } });
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many attempts, please try again later.' } });
 
 const app = express();
 const server = http.createServer(app);
@@ -74,6 +66,8 @@ app.use(express.urlencoded({ extended: true }));
 app.set('io', io);
 
 // Auth route
+app.use('/api', apiLimiter);
+app.use('/api/auth', authLimiter);
 app.use('/api/auth', authRoutes);
 
 // ============ API ROUTES (MongoDB or In-Memory) ============
@@ -624,7 +618,7 @@ app.get('/api/expenses/summary', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 app.get('/api/expenses/categories', (req, res) => {
-  res.json(['rent','laundry','electricity','water','staff_salary','cleaning','maintenance','internet','supplies','groceries','travel','marketing','other']);
+  res.json(EXPENSE_CATEGORIES);
 });
 app.get('/api/expenses', async (req, res) => {
   try {
@@ -1941,41 +1935,18 @@ app.post('/api/data/sync-to-code', (req, res) => {
 // arrived each month, so rent/salary/etc. don't need to be re-entered by hand. If the job
 // didn't run for a few months (server was down, or the expense was just marked recurring
 // today with an old start date), it catches up and backfills every month that was missed
-// rather than only ever generating the current month.
-function addMonthsToPeriod(period, n) { // period: 'YYYY-MM'
-  const [y, m] = period.split('-').map(Number);
-  const d = new Date(y, m - 1 + n, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-
+// rather than only ever generating the current month. Date math lives in
+// backend/utils/recurringExpenses.js so it can be unit tested without a database.
 async function processRecurringExpenses() {
   const nowIST = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
   const todayStr = nowIST.toISOString().split('T')[0];
-  const currentPeriod = todayStr.substring(0, 7); // YYYY-MM
-  const todayDay = nowIST.getDate();
 
   const templates = useMongo ? await Expense.find({ is_recurring: true }).lean() : store.expenses.filter(e => e.is_recurring);
 
   for (const t of templates) {
     const day = t.recurring_day || new Date(t.expense_date).getDate();
-    let period = t.recurring_last_run || t.expense_date.substring(0, 7);
-    const toGenerate = [];
-
-    // Walk forward one month at a time from the last generated period, catching up on
-    // every month that's fully elapsed, and including the current month once its day arrives.
-    while (true) {
-      const nextPeriod = addMonthsToPeriod(period, 1);
-      if (nextPeriod > currentPeriod) break;
-      const isCurrentPeriod = nextPeriod === currentPeriod;
-      const [py, pm] = nextPeriod.split('-').map(Number);
-      const lastDayOfPeriod = new Date(py, pm, 0).getDate();
-      const effectiveDay = Math.min(day, lastDayOfPeriod); // clamp e.g. day 31 into a 30-day month
-      if (isCurrentPeriod && todayDay < effectiveDay) break; // this month not due yet
-
-      toGenerate.push(`${nextPeriod}-${String(effectiveDay).padStart(2, '0')}`);
-      period = nextPeriod;
-      if (isCurrentPeriod) break;
-    }
+    const lastRunPeriod = t.recurring_last_run || t.expense_date.substring(0, 7);
+    const { dates: toGenerate, newLastRunPeriod } = computeDueDates({ day, lastRunPeriod, todayStr });
 
     if (toGenerate.length === 0) continue;
 
@@ -1990,8 +1961,8 @@ async function processRecurringExpenses() {
       console.log(`[Recurring Expense] Generated "${t.description}" (Rs.${t.amount}) for ${dateStr}`);
     }
 
-    if (useMongo) { await Expense.updateOne({ id: t.id }, { recurring_last_run: period }); }
-    else { t.recurring_last_run = period; }
+    if (useMongo) { await Expense.updateOne({ id: t.id }, { recurring_last_run: newLastRunPeriod }); }
+    else { t.recurring_last_run = newLastRunPeriod; }
   }
 }
 
@@ -2008,6 +1979,18 @@ setTimeout(() => {
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
+});
+
+// Sentry's error handler must come after routes/404, before our own final handler
+setupExpressErrorHandler(app);
+
+// Catch-all error handler — routes already catch their own errors, this is the safety
+// net for anything thrown outside a try/catch (sync errors, middleware, etc.)
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  captureException(err);
+  if (res.headersSent) return next(err);
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 const PORT = process.env.PORT || 5000;
