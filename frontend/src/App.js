@@ -1156,10 +1156,8 @@ const Bookings = () => {
   const handlePerDayChange = (val) => {
     setBForm(prev => {
       const next = { ...prev, nightly_rate: val };
-      if (prev.final_amount === '' || prev.final_amount == null) {
-        const nights = computeNights(prev.check_in, prev.check_out);
-        if (nights > 0 && val !== '') next.final_amount = paiseToRupees(toPaise(val) * nights).toFixed(2);
-      }
+      const nights = computeNights(prev.check_in, prev.check_out);
+      if (nights > 0 && val !== '') next.final_amount = paiseToRupees(toPaise(val) * nights).toFixed(2);
       return next;
     });
   };
@@ -1167,10 +1165,8 @@ const Bookings = () => {
   const handleFinalAmountChange = (val) => {
     setBForm(prev => {
       const next = { ...prev, final_amount: val };
-      if (prev.nightly_rate === '' || prev.nightly_rate == null) {
-        const nights = computeNights(prev.check_in, prev.check_out);
-        if (nights > 0 && val !== '') next.nightly_rate = paiseToRupees(toPaise(val) / nights).toFixed(2);
-      }
+      const nights = computeNights(prev.check_in, prev.check_out);
+      if (nights > 0 && val !== '') next.nightly_rate = paiseToRupees(toPaise(val) / nights).toFixed(2);
       return next;
     });
   };
