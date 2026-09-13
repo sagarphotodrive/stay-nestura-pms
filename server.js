@@ -1635,7 +1635,7 @@ app.get('/', (req, res) => {
   <div class="main">
     <!-- Welcome -->
     <div class="welcome">
-      <h1>Welcome to Stay Nestura PMS</h1>
+      <h1>Welcome to Stay Nestura</h1>
       <p>Your central hub for managing homestays, bookings, guests, and OTA channels.</p>
     </div>
 
