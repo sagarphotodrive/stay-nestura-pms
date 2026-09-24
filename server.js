@@ -509,7 +509,10 @@ app.get('/api/public/properties', async (req, res) => {
       ? await Property.find({ is_active: true }).lean()
       : store.properties.filter(p => p.is_active !== false);
     res.json(props.map(toPublicProperty));
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error('GET /api/public/properties failed:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/public/properties/:id', async (req, res) => {
@@ -520,7 +523,10 @@ app.get('/api/public/properties/:id', async (req, res) => {
       : store.properties.find(p => p.id === id && p.is_active !== false);
     if (!prop) return res.status(404).json({ error: 'Not found' });
     res.json(toPublicProperty(prop));
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error(`GET /api/public/properties/${req.params.id} failed:`, err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/public/properties/:id/availability', async (req, res) => {
@@ -532,7 +538,10 @@ app.get('/api/public/properties/:id/availability', async (req, res) => {
     if (start) avail = avail.filter(a => a.date >= start);
     if (end) avail = avail.filter(a => a.date <= end);
     res.json(getUnavailableRanges(bookings, avail));
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error(`GET /api/public/properties/${req.params.id}/availability failed:`, err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/public/bookings', publicBookingLimiter, async (req, res) => {
@@ -595,7 +604,7 @@ app.post('/api/public/bookings', publicBookingLimiter, async (req, res) => {
 
     // The booking-by-customer flow (booking form + payment) lives in the separate
     // BookingSession service, which calls this endpoint to create the 'pending' booking,
-    // then confirms payment via POST /api/public/bookings/:id/confirm-payment below. The
+    // then flags payment via POST /api/public/bookings/:id/mark-payment-claimed below. The
     // numeric id returned here is only ever seen by that trusted server, never a browser.
     res.status(201).json({
       id: booking.id,
@@ -607,7 +616,10 @@ app.post('/api/public/bookings', publicBookingLimiter, async (req, res) => {
       currency: booking.currency,
       booking_status: booking.booking_status,
     });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error('POST /api/public/bookings failed:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Called by the BookingSession service when the guest clicks "I've Paid" on the UPI
@@ -631,9 +643,13 @@ app.post('/api/public/bookings/:id/mark-payment-claimed', publicBookingLimiter, 
       const property = useMongo ? await Property.findOne({ id: booking.property_id }).lean() : store.properties.find(p => p.id === booking.property_id);
       const io = app.get('io');
       if (io) io.emit('booking:payment-claimed', { booking_id: id, property_name: property?.name });
+      console.log(`Payment claimed for booking #${id} — awaiting staff verification`);
     }
     res.json({ status: 'ok' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    console.error(`POST /api/public/bookings/${req.params.id}/mark-payment-claimed failed:`, err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // --- GUESTS ---
@@ -1280,12 +1296,19 @@ app.post('/api/webhooks/airbnb', (req, res) => { res.json({ status: 'processed' 
 app.post('/api/webhooks/booking', (req, res) => { res.json({ status: 'processed' }); });
 app.post('/api/webhooks/test', (req, res) => { res.json({ status: 'ok', received: req.body }); });
 
-// Health check endpoint
+// Health check endpoint — deliberately reports which commit/branch is actually running
+// and which database backend is active. Render sets RENDER_GIT_COMMIT/RENDER_GIT_BRANCH
+// automatically; a stale deploy or a silently-failed Mongo connection are otherwise very
+// hard to tell apart from the outside (both just look like "old/missing data").
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    system: 'Stay Nestura PMS'
+    system: 'Stay Nestura PMS',
+    commit: process.env.RENDER_GIT_COMMIT || null,
+    branch: process.env.RENDER_GIT_BRANCH || null,
+    database: useMongo ? 'mongodb' : 'in-memory',
+    uptime_seconds: Math.round(process.uptime()),
   });
 });
 
@@ -2154,6 +2177,12 @@ const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`Stay Nestura PMS running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  // RENDER_GIT_COMMIT/RENDER_GIT_BRANCH are set automatically by Render — logging them
+  // makes it obvious from the logs alone which commit/branch a given deploy is actually
+  // running, without having to cross-check the dashboard.
+  if (process.env.RENDER_GIT_COMMIT) {
+    console.log(`Deployed commit: ${process.env.RENDER_GIT_COMMIT} (branch: ${process.env.RENDER_GIT_BRANCH || 'unknown'})`);
+  }
 });
 
 // Connect MongoDB in background — server uses in-memory until connected
