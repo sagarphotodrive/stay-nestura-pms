@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: stay-nestura-pms
+    runtime: node
+    plan: free
+    buildCommand: npm run build
+    startCommand: npm start
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+      # Optional: connect a real MongoDB Atlas cluster to persist data across restarts.
+      # Omit to run on the built-in in-memory store (resets whenever the service restarts
+      # or spins down on the free plan — fine for a demo, not for real bookings).
+      - key: MONGODB_URI
+        sync: false

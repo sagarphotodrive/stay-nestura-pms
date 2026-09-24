@@ -394,6 +394,11 @@ const Bookings = () => {
               <span className={`status-badge ${booking.booking_status}`}>
                 {(booking.booking_status || '').replace(/-/g, ' ')}
               </span>
+              {booking.payment_claimed_at && booking.payment_status !== 'paid' && (
+                <span className="status-badge" style={{ background: '#fef3c7', color: '#92400e' }} title={`Guest marked this paid on ${booking.payment_claimed_at}`}>
+                  Guest says paid — verify UPI
+                </span>
+              )}
               <button className="btn btn-sm btn-edit" onClick={() => openEdit(booking)}><Edit3 size={14} /> Edit</button>
               <button className="btn btn-sm btn-secondary" onClick={() => generateBookingBillPDF(booking)} title="Download PDF bill"><FileText size={14} /> Bill</button>
               {booking.booking_status === 'pending' && (

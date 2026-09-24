@@ -36,6 +36,10 @@ const bookingSchema = new mongoose.Schema({
   confirmed_at: String,
   cancelled_at: String,
   cancellation_reason: String,
+  // Set when the guest clicks "I've Paid" on the BookingSession UPI payment page — a
+  // guest-asserted claim only, never proof of payment. Staff verify the actual UPI/bank
+  // transfer and confirm the booking manually (see Bookings.js "Confirm Booking").
+  payment_claimed_at: String,
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 module.exports = mongoose.model('Booking', bookingSchema);

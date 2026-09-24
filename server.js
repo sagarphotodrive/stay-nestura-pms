@@ -47,6 +47,9 @@ const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHea
 const publicBookingLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 8, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many booking requests from this device. Please try again later or contact us directly.' } });
 
 const app = express();
+// Render (and most PaaS hosts) terminate TLS at a proxy in front of this process, so
+// req.protocol would otherwise report 'http' even on an https:// request.
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 
 // Socket.IO for real-time updates
@@ -590,7 +593,46 @@ app.post('/api/public/bookings', publicBookingLimiter, async (req, res) => {
     const io = req.app.get('io');
     if (io) io.emit('new-booking-request', { id: booking.id, property_name: property.name, guest_name: `${guest.first_name} ${guest.last_name}`.trim(), check_in: booking.check_in, check_out: booking.check_out });
 
-    res.status(201).json({ id: booking.id, property_name: property.name, check_in: booking.check_in, check_out: booking.check_out, nights, nightly_rate: nightlyRate, gross_amount: grossAmount, booking_status: booking.booking_status });
+    // The booking-by-customer flow (booking form + payment) lives in the separate
+    // BookingSession service, which calls this endpoint to create the 'pending' booking,
+    // then confirms payment via POST /api/public/bookings/:id/confirm-payment below. The
+    // numeric id returned here is only ever seen by that trusted server, never a browser.
+    res.status(201).json({
+      id: booking.id,
+      property_name: property.name,
+      check_in: booking.check_in,
+      check_out: booking.check_out,
+      nights,
+      amount: booking.gross_amount,
+      currency: booking.currency,
+      booking_status: booking.booking_status,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Called by the BookingSession service when the guest clicks "I've Paid" on the UPI
+// payment page. This is a guest-asserted claim only — it does NOT confirm the booking
+// or mark it paid; it just flags the booking for staff to verify the actual UPI/bank
+// transfer and confirm manually from the admin Bookings page. Public and unauthenticated
+// by design (same trust level as the booking submission itself), rate-limited to match.
+app.post('/api/public/bookings/:id/mark-payment-claimed', publicBookingLimiter, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const booking = useMongo ? await Booking.findOne({ id }).lean() : store.bookings.find(b => b.id === id);
+    if (!booking) return res.status(404).json({ error: 'BOOKING_NOT_FOUND' });
+
+    if (!booking.payment_claimed_at) {
+      const updates = { payment_claimed_at: new Date().toISOString() };
+      if (useMongo) {
+        await Booking.findOneAndUpdate({ id }, { $set: updates });
+      } else {
+        Object.assign(booking, updates, { updated_at: new Date().toISOString() });
+      }
+      const property = useMongo ? await Property.findOne({ id: booking.property_id }).lean() : store.properties.find(p => p.id === booking.property_id);
+      const io = app.get('io');
+      if (io) io.emit('booking:payment-claimed', { booking_id: id, property_name: property?.name });
+    }
+    res.json({ status: 'ok' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
