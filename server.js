@@ -503,6 +503,11 @@ const toPublicProperty = (p) => ({
   latitude: p.latitude, longitude: p.longitude, google_maps_link: p.google_maps_link,
 });
 
+// Human-friendly reference the guest can quote to staff ("SN-000457") — deterministic
+// from the booking id, so it needs no extra storage and staff can just search/scan the
+// admin Bookings list for the same id to find the matching pending request.
+const bookingReference = (id) => `SN-${String(id).padStart(6, '0')}`;
+
 app.get('/api/public/properties', async (req, res) => {
   try {
     const props = useMongo
@@ -608,6 +613,7 @@ app.post('/api/public/bookings', publicBookingLimiter, async (req, res) => {
     // numeric id returned here is only ever seen by that trusted server, never a browser.
     res.status(201).json({
       id: booking.id,
+      reference: bookingReference(booking.id),
       property_name: property.name,
       check_in: booking.check_in,
       check_out: booking.check_out,

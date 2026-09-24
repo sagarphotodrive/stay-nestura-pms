@@ -369,6 +369,7 @@ const Bookings = () => {
               <div className="booking-guest-info">
                 <h3>{booking.first_name} {booking.last_name}</h3>
                 <p>{booking.property_name}</p>
+                <p style={{ fontSize: '12px', color: '#888', fontFamily: 'monospace' }}>Ref: SN-{String(booking.id).padStart(6, '0')}</p>
               </div>
               <div className="booking-dates">
                 <div className="date-range">
