@@ -41,9 +41,14 @@ const generateBookingWhatsAppMsg = (b, prop) => {
   const emergencyNo = isSolapurGroup ? '8308122281' : '9766504266';
   msg += `\nContact: ${contactNo}\nEmergency: ${emergencyNo}\n`;
   msg += `\n*House Rules:*\n`;
-  msg += `• Kitchen utensils must be cleaned before check-out.\n  (₹250 charge if maid service required for utensils only. ₹500 for house cleaning if staying less than 3 days. For more than 3 days, every third day room service will be provided.)\n`;
+  msg += `• Kitchen utensils must be cleaned before check-out.\n`;
   msg += `• Please use water & electricity wisely — Turn off taps and shower in time and don't let water just flow away as we receive corporation water supply once in 5 days!! Switch off all appliances and lights when they are not in use.\n`;
   msg += `• This is a homestay, not a hotel, so kindly take care of it and treat it as your own home.\n`;
+  msg += `• The WiFi password and full house rules are available on the welcome board.\n`;
+  msg += `\n*Cancellation Policy:*\n`;
+  msg += `• 100% refund up to 10 days before check-in.\n`;
+  msg += `• 100% credit note up to 3 days before check-in.\n`;
+  msg += `• No refund after that.\n`;
   msg += `\nPlease ensure the required documents are submitted before arrival to avoid any inconvenience.\n`;
   msg += `\nThank you,\nTeam ${propName} by Stay Nestura`;
   return msg;

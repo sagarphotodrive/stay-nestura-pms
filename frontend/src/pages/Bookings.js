@@ -5,7 +5,7 @@ import {
   Edit3, FileText, Copy, IndianRupee, Trash2
 } from 'lucide-react';
 import { api } from '../lib/api';
-import { format, safeFormat, toPaise, paiseToRupees, computeNights } from '../lib/format';
+import { format, safeFormat, toPaise, paiseToRupees, computeNights, perDayMatchesTotal } from '../lib/format';
 import { generateBookingBillPDF } from '../lib/pdf';
 import { openWhatsApp, copyBookingMessage } from '../lib/whatsapp';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -138,7 +138,8 @@ const Bookings = () => {
   const bFinalPaise = toPaise(bForm.final_amount);
   const bCalculatedPaise = bPerDayPaise * bNights;
   const bAmountsReady = bForm.nightly_rate !== '' && bForm.final_amount !== '' && bNights > 0;
-  const bAmountsMatch = !bAmountsReady || bCalculatedPaise === bFinalPaise;
+  const bAmountsMatch = !bAmountsReady || perDayMatchesTotal(bPerDayPaise, bNights, bFinalPaise);
+  const bRounded = bAmountsReady && bAmountsMatch && bCalculatedPaise !== bFinalPaise;
 
   const handlePerDayChange = (val) => {
     setBForm(prev => {
@@ -290,7 +291,7 @@ const Bookings = () => {
               {bAmountsReady && (
                 <div className={`availability-indicator ${bAmountsMatch ? 'available' : 'conflict'}`} style={{ marginBottom: '12px' }}>
                   {bAmountsMatch ? (
-                    <><CheckCircle size={16} /> ₹{parseFloat(bForm.nightly_rate).toLocaleString()} × {bNights} = ₹{paiseToRupees(bCalculatedPaise).toLocaleString()} — Amounts match</>
+                    <><CheckCircle size={16} /> ₹{parseFloat(bForm.nightly_rate).toLocaleString()} × {bNights} {bRounded ? '≈' : '='} ₹{paiseToRupees(bFinalPaise).toLocaleString()} — Amounts match{bRounded ? ' (per-day rounded)' : ''}</>
                   ) : (
                     <><AlertCircle size={16} /> ₹{parseFloat(bForm.nightly_rate).toLocaleString()} × {bNights} = ₹{paiseToRupees(bCalculatedPaise).toLocaleString()} — Amount mismatch. Per-day amount × number of days must equal final amount.</>
                   )}

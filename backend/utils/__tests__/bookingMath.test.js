@@ -62,4 +62,15 @@ describe('validateBookingAmounts', () => {
     // 3 nights at 33.33 should total 99.99, not 99.99000000000001
     expect(validateBookingAmounts({ ...base, nightly_rate: 33.33, gross_amount: 99.99 })).toBeNull();
   });
+
+  test('accepts a per-day amount rounded from a total that does not divide evenly', () => {
+    // 7400 / 3 nights = 2466.666... -> 2466.67 (or 2466.66 if rounded down)
+    expect(validateBookingAmounts({ ...base, nightly_rate: 2466.67, gross_amount: 7400 })).toBeNull();
+    expect(validateBookingAmounts({ ...base, nightly_rate: 2466.66, gross_amount: 7400 })).toBeNull();
+  });
+
+  test('still rejects a per-day amount that is off by more than rounding', () => {
+    expect(validateBookingAmounts({ ...base, nightly_rate: 2466.6, gross_amount: 7400 })).toMatchObject({ error: 'AMOUNT_MISMATCH' });
+    expect(validateBookingAmounts({ ...base, nightly_rate: 2467, gross_amount: 7400 })).toMatchObject({ error: 'AMOUNT_MISMATCH' });
+  });
 });

@@ -1,6 +1,11 @@
 // Currency-safe money helpers (paise-based to avoid float drift) + booking amount validation.
 // Rule enforced everywhere (frontend, backend, invoice): perDayAmount x numberOfDays == finalAmount.
+// The final amount is authoritative; the per-day amount may be the final amount divided by nights and
+// to the paisa (e.g. 7400 / 3 = 2466.67 or 2466.66), i.e. within one paisa of the exact per-day value.
 const toPaise = (v) => Math.round((parseFloat(v) || 0) * 100);
+
+const perDayMatchesTotal = (perDayPaise, nights, totalPaise) =>
+  Math.abs(perDayPaise * nights - totalPaise) < Math.max(1, nights);
 
 function validateBookingAmounts({ check_in, check_out, nightly_rate, gross_amount, cleaning_fee, service_fee, taxes }) {
   const nights = Math.ceil((new Date(check_out) - new Date(check_in)) / 86400000);
@@ -12,7 +17,7 @@ function validateBookingAmounts({ check_in, check_out, nightly_rate, gross_amoun
   const extrasPaise = toPaise(cleaning_fee) + toPaise(service_fee) + toPaise(taxes);
   const expectedPaise = toPaise(perDay) * nights + extrasPaise;
   const finalPaise = toPaise(final);
-  if (expectedPaise !== finalPaise) {
+  if (!perDayMatchesTotal(toPaise(perDay), nights, finalPaise - extrasPaise)) {
     return {
       error: 'AMOUNT_MISMATCH',
       message: 'Per-day amount multiplied by number of days does not match the final amount.',
@@ -23,4 +28,4 @@ function validateBookingAmounts({ check_in, check_out, nightly_rate, gross_amoun
   return null;
 }
 
-module.exports = { toPaise, validateBookingAmounts };
+module.exports = { toPaise, perDayMatchesTotal, validateBookingAmounts };
