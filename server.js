@@ -436,6 +436,19 @@ app.put('/api/bookings/:id', async (req, res) => {
       if (amountError) return res.status(400).json(amountError);
     }
 
+    // Name/phone/email belong to the guest, not the booking (the Booking schema has no such
+    // fields, so they used to be silently dropped). Save non-empty values onto the linked guest.
+    const guestUpdates = {};
+    for (const f of ['first_name', 'last_name', 'phone', 'email']) {
+      if (typeof updates[f] === 'string' && updates[f].trim()) guestUpdates[f] = updates[f].trim();
+      delete updates[f];
+    }
+    const guestId = parseInt(updates.guest_id || current.guest_id);
+    if (guestId && Object.keys(guestUpdates).length) {
+      if (useMongo) { await Guest.updateOne({ id: guestId }, { $set: guestUpdates }); }
+      else { const g = store.guests.find(gs => gs.id === guestId); if (g) Object.assign(g, guestUpdates, { updated_at: new Date().toISOString() }); }
+    }
+
     if (useMongo) {
       const b = await Booking.findOneAndUpdate({ id: parseInt(req.params.id) }, { $set: updates }, { new: true }).lean();
       if (!b) return res.status(404).json({ error: 'Not found' });

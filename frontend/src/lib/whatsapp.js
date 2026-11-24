@@ -61,7 +61,16 @@ export const openWhatsApp = (b, prop) => {
   }
   const msg = generateBookingWhatsAppMsg(b, prop);
   const fullPhone = toWhatsAppNumber(b.phone);
-  window.open(`https://wa.me/${fullPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+  const waUrl = `https://wa.me/${fullPhone}?text=${encodeURIComponent(msg)}`;
+  // On Android a wa.me link opens whichever WhatsApp the phone prefers (often the personal
+  // app). An Android intent link can name the WhatsApp Business app (package com.whatsapp.w4b)
+  // directly; if Business isn't installed, Chrome falls back to the normal wa.me link.
+  // iOS has no way for a web page to pick between the two apps, so it keeps using wa.me.
+  if (/Android/i.test(navigator.userAgent)) {
+    window.location.href = `intent://send/?phone=${fullPhone}&text=${encodeURIComponent(msg)}#Intent;scheme=whatsapp;package=com.whatsapp.w4b;S.browser_fallback_url=${encodeURIComponent(waUrl)};end`;
+    return;
+  }
+  window.open(waUrl, '_blank');
 };
 
 export const copyBookingMessage = (b, prop) => {

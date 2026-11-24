@@ -20,6 +20,19 @@ export const toE164 = (phone, defaultCountry = 'IN') => {
   } catch { return trimmed; }
 };
 
+// Splits a stored phone into country code and local number for display,
+// e.g. "+91-9820547398" or "9820547398" → { code: '+91', national: '98205 47398', country: 'IN' }.
+// Numbers that can't be parsed (incomplete legacy entries) come back as-is with no code.
+export const splitPhone = (phone, defaultCountry = 'IN') => {
+  if (!phone) return { code: '', national: '', country: '' };
+  const trimmed = String(phone).trim();
+  try {
+    const p = parsePhoneNumberFromString(trimmed, trimmed.startsWith('+') ? undefined : defaultCountry);
+    if (p && p.isValid()) return { code: `+${p.countryCallingCode}`, national: p.formatNational().replace(/^0/, ''), country: p.country || '' };
+  } catch {}
+  return { code: '', national: trimmed, country: '' };
+};
+
 // Digits-only, country-code-included number for wa.me links — derived from the
 // guest's own selected country, never a hardcoded prefix.
 export const toWhatsAppNumber = (phone) => toE164(phone).replace(/[^\d]/g, '');

@@ -5,6 +5,21 @@ import { api } from '../lib/api';
 import { safeFormat } from '../lib/format';
 import LoadingSpinner from '../components/LoadingSpinner';
 import PhoneInput from '../components/PhoneInput';
+import { splitPhone, toFlagEmoji } from '../lib/phone';
+
+// Phone shown as a separate country-code badge followed by the local number.
+const PhoneDisplay = ({ phone }) => {
+  const { code, national, country } = splitPhone(phone);
+  if (!code) return <span>{national || '-'}</span>;
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}>
+      <span title={country} style={{ padding: '1px 6px', borderRadius: '4px', background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)', fontSize: '0.85em', color: 'var(--text-secondary)' }}>
+        {country ? `${toFlagEmoji(country)} ` : ''}{code}
+      </span>
+      <span>{national}</span>
+    </span>
+  );
+};
 
 // Guests Component
 const Guests = () => {
@@ -120,7 +135,7 @@ const Guests = () => {
               <tr key={guest.id} onClick={() => viewGuestDetails(guest)} style={{ cursor: 'pointer' }}>
                 <td><div className="guest-avatar-sm">{guest.first_name?.[0]}{guest.last_name?.[0]}</div></td>
                 <td className="guest-td-name">{guest.first_name} {guest.last_name}</td>
-                <td className="guest-td-phone">{guest.phone || '-'}</td>
+                <td className="guest-td-phone"><PhoneDisplay phone={guest.phone} /></td>
                 <td className="guest-td-email">{guest.email || '-'}</td>
                 <td>{guest.nationality || '-'}</td>
                 <td style={{ textAlign: 'center' }}><span className="guest-stays-badge">{guest.total_stays || 0}</span></td>
@@ -154,7 +169,7 @@ const Guests = () => {
             </div>
             <div className="guest-detail-body">
               <div className="guest-detail-grid">
-                <div><span className="detail-label-sm">Phone</span><div className="detail-value-sm">{selectedGuest.phone || '-'}</div></div>
+                <div><span className="detail-label-sm">Phone</span><div className="detail-value-sm">{selectedGuest.phone ? <PhoneDisplay phone={selectedGuest.phone} /> : <button type="button" className="btn btn-sm btn-secondary" onClick={() => { const g = selectedGuest; setSelectedGuest(null); openEdit(g); }}>Not added — add phone</button>}</div></div>
                 <div><span className="detail-label-sm">Email</span><div className="detail-value-sm">{selectedGuest.email || '-'}</div></div>
                 <div><span className="detail-label-sm">Nationality</span><div className="detail-value-sm">{selectedGuest.nationality || '-'}</div></div>
                 <div><span className="detail-label-sm">Total Stays</span><div className="detail-value-sm">{selectedGuest.total_stays || 0}</div></div>
