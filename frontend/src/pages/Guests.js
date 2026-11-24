@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Plus, X, Search, Edit3 } from 'lucide-react';
+import { Plus, X, Search, Edit3, CalendarPlus } from 'lucide-react';
 import { api } from '../lib/api';
 import { safeFormat } from '../lib/format';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -36,10 +36,11 @@ const Guests = () => {
 
   const viewGuestDetails = async (guest) => {
     setSelectedGuest(guest);
+    setGuestBookings([]);
     try {
-      const res = await api.get('/bookings');
-      const allBookings = res.data.bookings || res.data || [];
-      const gb = allBookings.filter(b => b.guest_id === guest.id).sort((a, b) => b.check_in.localeCompare(a.check_in));
+      // The guest endpoint returns all of this guest's bookings (the /bookings list is paginated to 20).
+      const res = await api.get(`/guests/${guest.id}`);
+      const gb = (res.data.bookings || []).sort((a, b) => (b.check_in || '').localeCompare(a.check_in || ''));
       setGuestBookings(gb);
     } catch (err) { setGuestBookings([]); }
   };
@@ -144,7 +145,12 @@ const Guests = () => {
           <div className="modal-content modal-large" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>{selectedGuest.first_name} {selectedGuest.last_name}</h2>
-              <button className="modal-close" onClick={() => setSelectedGuest(null)}><X size={20}/></button>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <button className="btn btn-primary btn-sm" onClick={() => { const id = selectedGuest.id; setSelectedGuest(null); navigate(`/bookings?action=new&guest_id=${id}`); }}>
+                  <CalendarPlus size={16} /> New Booking
+                </button>
+                <button className="modal-close" onClick={() => setSelectedGuest(null)}><X size={20}/></button>
+              </div>
             </div>
             <div className="guest-detail-body">
               <div className="guest-detail-grid">

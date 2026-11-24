@@ -343,17 +343,22 @@ app.post('/api/bookings', async (req, res) => {
     let guestId = b.guest_id ? parseInt(b.guest_id) : null;
     if (!guestId && (b.first_name || b.phone)) {
       const key = [(b.first_name||'').trim().toLowerCase(), (b.last_name||'').trim().toLowerCase(), (b.phone||'').trim(), (b.email||'').trim().toLowerCase()].join('|');
+      // Returning guests are recognised by phone (last 10 digits, so "+91 98765…" and "98765…" match).
+      const phoneTail = (p) => String(p || '').replace(/\D/g, '').slice(-10);
+      const bPhone = phoneTail(b.phone);
+      const findGuest = (list) => (bPhone.length >= 6 && list.find(g => phoneTail(g.phone) === bPhone))
+        || list.find(g => [(g.first_name||'').trim().toLowerCase(), (g.last_name||'').trim().toLowerCase(), (g.phone||'').trim(), (g.email||'').trim().toLowerCase()].join('|') === key);
       let guest;
       if (useMongo) {
         const allGuests = await Guest.find().lean();
-        guest = allGuests.find(g => [(g.first_name||'').trim().toLowerCase(), (g.last_name||'').trim().toLowerCase(), (g.phone||'').trim(), (g.email||'').trim().toLowerCase()].join('|') === key);
+        guest = findGuest(allGuests);
         if (!guest) {
           const gid = await nextId('guests');
           guest = await Guest.create({ id: gid, first_name: (b.first_name||'').trim(), last_name: (b.last_name||'').trim(), email: (b.email||'').trim(), phone: (b.phone||'').trim(), nationality: 'Indian' });
           guest = guest.toObject();
         }
       } else {
-        guest = store.guests.find(g => [(g.first_name||'').trim().toLowerCase(), (g.last_name||'').trim().toLowerCase(), (g.phone||'').trim(), (g.email||'').trim().toLowerCase()].join('|') === key);
+        guest = findGuest(store.guests);
         if (!guest) {
           guest = { id: _nextId(), first_name: (b.first_name||'').trim(), last_name: (b.last_name||'').trim(), email: (b.email||'').trim(), phone: (b.phone||'').trim(), id_proof_type: null, id_proof_number: null, id_proof_encrypted: null, address: '', date_of_birth: null, nationality: 'Indian', total_stays: 0, total_spent: 0, lifetime_value: 0, preferences: '', notes: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
           store.guests.push(guest);
@@ -2161,6 +2166,28 @@ cron.schedule('0 6 * * *', () => {
 setTimeout(() => {
   processRecurringExpenses().catch(err => console.error('Recurring expense startup check failed:', err));
 }, 10000);
+
+// Keep-alive: Render's free plan puts the service to sleep after ~15 minutes without
+// incoming traffic, so the first visitor afterwards waits 30-60s for a cold start.
+// Every 14 min 30 s (default) we request our own public /api/health URL. It must be the
+// public URL (not localhost) so the request passes through Render's proxy and counts as traffic.
+// Render sets RENDER_EXTERNAL_URL automatically; KEEP_ALIVE_URL overrides it (e.g. for a
+// custom domain), KEEP_ALIVE_INTERVAL_SECONDS changes the interval (lower it if the site
+// still falls asleep), and KEEP_ALIVE=off disables the job. Locally none is set, so nothing runs.
+const keepAliveBase = (process.env.KEEP_ALIVE_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/+$/, '');
+if (keepAliveBase && process.env.KEEP_ALIVE !== 'off') {
+  const keepAliveUrl = `${keepAliveBase}/api/health`;
+  const keepAliveSeconds = Math.max(10, parseInt(process.env.KEEP_ALIVE_INTERVAL_SECONDS, 10) || 870); // 870 s = 14 min 30 s
+  setInterval(async () => {
+    try {
+      const res = await fetch(keepAliveUrl, { signal: AbortSignal.timeout(30000), headers: { 'User-Agent': 'stay-nestura-keep-alive' } });
+      if (!res.ok) console.warn(`Keep-alive ping returned HTTP ${res.status}`);
+    } catch (err) {
+      console.warn('Keep-alive ping failed:', err.message);
+    }
+  }, keepAliveSeconds * 1000);
+  console.log(`Keep-alive enabled: pinging ${keepAliveUrl} every ${Math.floor(keepAliveSeconds / 60)} min ${keepAliveSeconds % 60} s`);
+}
 
 // 404 handler
 app.use((req, res) => {

@@ -28,7 +28,10 @@ const Bookings = () => {
   const [submitting, setSubmitting] = useState(false);
   const [properties, setProperties] = useState([]);
   const [availabilityStatus, setAvailabilityStatus] = useState(null);
-  const emptyBForm = { property_id: '', first_name: '', last_name: '', phone: '', email: '', check_in: '', check_out: '', adults: 1, children: 0, nightly_rate: '', final_amount: '', channel: 'direct', payment_method: 'UPI', special_requests: '', advance_paid: 0 };
+  const [guestQuery, setGuestQuery] = useState('');
+  const [guestMatches, setGuestMatches] = useState([]);
+  const [linkedGuest, setLinkedGuest] = useState(null);
+  const emptyBForm = { property_id: '', guest_id: '', first_name: '', last_name: '', phone: '', email: '', check_in: '', check_out: '', adults: 1, children: 0, nightly_rate: '', final_amount: '', channel: 'direct', payment_method: 'UPI', special_requests: '', advance_paid: 0 };
   const [bForm, setBForm] = useState(emptyBForm);
 
   // Auto-open prefilled form from calendar click or homepage action=new
@@ -51,10 +54,35 @@ const Bookings = () => {
       }).catch(() => {});
       setSearchParams({}, { replace: true });
     } else if (action === 'new') {
+      const gid = searchParams.get('guest_id');
       openForm();
+      if (gid) api.get(`/guests/${gid}`).then(res => selectGuest(res.data)).catch(() => {});
       setSearchParams({}, { replace: true });
     }
   }, []);
+
+  // Returning-guest search (new bookings only)
+  useEffect(() => {
+    const q = guestQuery.trim();
+    if (q.length < 2) { setGuestMatches([]); return; }
+    const t = setTimeout(() => {
+      api.get('/guests/search/query', { params: { q } }).then(res => setGuestMatches(res.data || [])).catch(() => setGuestMatches([]));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [guestQuery]);
+
+  const selectGuest = (g) => {
+    if (!g) return;
+    setLinkedGuest(g);
+    setGuestQuery('');
+    setGuestMatches([]);
+    setBForm(prev => ({ ...prev, guest_id: g.id, first_name: g.first_name || '', last_name: g.last_name || '', phone: g.phone || '', email: g.email || '' }));
+  };
+
+  const clearLinkedGuest = () => {
+    setLinkedGuest(null);
+    setBForm(prev => ({ ...prev, guest_id: '', first_name: '', last_name: '', phone: '', email: '' }));
+  };
 
   useEffect(() => {
     fetchBookings();
@@ -117,6 +145,8 @@ const Bookings = () => {
       const pRes = await api.get('/properties');
       setProperties(pRes.data || []);
       setEditId(null);
+      setLinkedGuest(null);
+      setGuestQuery('');
       setShowForm(true);
     } catch (err) { console.error(err); }
   };
@@ -127,7 +157,8 @@ const Bookings = () => {
       setProperties(pRes.data || []);
     } catch (err) {}
     setEditId(b.id);
-    setBForm({ property_id: String(b.property_id), first_name: b.first_name || '', last_name: b.last_name || '', phone: b.phone || '', email: b.email || '', check_in: b.check_in, check_out: b.check_out, adults: b.adults || 1, children: b.children || 0, nightly_rate: b.nightly_rate || '', final_amount: (b.gross_amount != null ? b.gross_amount : '') , channel: b.channel || 'direct', payment_method: b.payment_method || 'UPI', special_requests: b.special_requests || '', advance_paid: b.paid_amount || 0 });
+    setLinkedGuest(null);
+    setBForm({ property_id: String(b.property_id), guest_id: b.guest_id || '', first_name: b.first_name || '', last_name: b.last_name || '', phone: b.phone || '', email: b.email || '', check_in: b.check_in, check_out: b.check_out, adults: b.adults || 1, children: b.children || 0, nightly_rate: b.nightly_rate || '', final_amount: (b.gross_amount != null ? b.gross_amount : '') , channel: b.channel || 'direct', payment_method: b.payment_method || 'UPI', special_requests: b.special_requests || '', advance_paid: b.paid_amount || 0 });
     setShowForm(true);
   };
 
@@ -191,10 +222,12 @@ const Bookings = () => {
       const gross = paiseToRupees(bFinalPaise);
       const advancePaid = parseFloat(bForm.advance_paid) || 0;
       const data = { ...bForm, property_id: parseInt(bForm.property_id), nightly_rate: parseFloat(bForm.nightly_rate), gross_amount: gross, adults: parseInt(bForm.adults), children: parseInt(bForm.children), paid_amount: advancePaid, pending_amount: gross - advancePaid, payment_status: advancePaid >= gross ? 'paid' : advancePaid > 0 ? 'partial' : 'pending' };
+      if (data.guest_id) data.guest_id = parseInt(data.guest_id); else delete data.guest_id;
       if (editId) { await api.put(`/bookings/${editId}`, data); } else { await api.post('/bookings', data); }
       setShowForm(false);
       setBForm(emptyBForm);
       setEditId(null);
+      setLinkedGuest(null);
       setAvailabilityStatus(null);
       fetchBookings();
     } catch (err) {
@@ -245,6 +278,27 @@ const Bookings = () => {
               <div className="form-group"><label>Property *</label><select required value={bForm.property_id} onChange={e => { const p = properties.find(pr => pr.id === parseInt(e.target.value)); setBForm(prev => ({...prev, property_id: e.target.value})); if (p && !bForm.nightly_rate) handlePerDayChange(String(p.base_price)); }}><option value="">Select property</option>{properties.map(p => <option key={p.id} value={p.id}>{p.name} - ₹{p.base_price}/night</option>)}</select></div>
 
               <h4 style={{ margin: '12px 0 8px', color: '#94a3b8', fontSize: '14px' }}>Guest Details</h4>
+              {!editId && (linkedGuest ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', padding: '8px 12px', marginBottom: '12px', borderRadius: '8px', background: 'var(--bg-tertiary)', border: '1px solid var(--accent)', fontSize: '13px' }}>
+                  <span><CheckCircle size={14} style={{ verticalAlign: '-2px', color: 'var(--success)' }} /> Returning guest: <strong>{linkedGuest.first_name} {linkedGuest.last_name}</strong> · {linkedGuest.total_stays || 0} previous stay{(linkedGuest.total_stays || 0) === 1 ? '' : 's'}</span>
+                  <button type="button" className="btn btn-sm btn-secondary" onClick={clearLinkedGuest}>Change</button>
+                </div>
+              ) : (
+                <div className="form-group" style={{ position: 'relative' }}>
+                  <label>Returning guest? Search by name or phone</label>
+                  <input value={guestQuery} onChange={e => setGuestQuery(e.target.value)} placeholder="e.g. Sachin or 98765…" autoComplete="off" />
+                  {guestMatches.length > 0 && (
+                    <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 20, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '8px', maxHeight: '220px', overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.25)' }}>
+                      {guestMatches.map(g => (
+                        <div key={g.id} onClick={() => selectGuest(g)} style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border-light)', fontSize: '13px' }}
+                          onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-tertiary)'; }} onMouseLeave={e => { e.currentTarget.style.background = ''; }}>
+                          <strong>{g.first_name} {g.last_name}</strong> <span style={{ color: 'var(--text-secondary)' }}>· {g.phone || 'no phone'} · {g.total_stays || 0} stay{(g.total_stays || 0) === 1 ? '' : 's'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
               <div className="form-row">
                 <div className="form-group"><label>First Name *</label><input required value={bForm.first_name} onChange={e => setBForm({...bForm, first_name: e.target.value})} placeholder="First name"/></div>
                 <div className="form-group"><label>Last Name *</label><input required value={bForm.last_name} onChange={e => setBForm({...bForm, last_name: e.target.value})} placeholder="Last name"/></div>
