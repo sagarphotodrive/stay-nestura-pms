@@ -455,6 +455,16 @@ const Bookings = () => {
                   Guest says paid — verify UPI
                 </span>
               )}
+              {((booking.auto_checked_out_at && booking.booking_status === 'checked-out') || (booking.auto_checked_in_at && booking.booking_status === 'checked-in')) && (
+                <span className="status-badge" style={{ background: '#e0f2fe', color: '#075985' }} title="Nobody updated this booking's status, so it was updated automatically 24 hours after the scheduled time">
+                  {booking.booking_status === 'checked-out' ? 'Auto checked-out' : 'Auto checked-in'}
+                </span>
+              )}
+              {booking.auto_marked_paid_at && booking.payment_status === 'paid' && (
+                <span className="status-badge" style={{ background: '#e0e7ff', color: '#3730a3' }} title={`No payment was recorded, so this was marked paid automatically 7 days after check-out (${safeFormat(booking.auto_marked_paid_at, 'dd MMM yyyy')})`}>
+                  Auto-marked paid
+                </span>
+              )}
               <button className="btn btn-sm btn-edit" onClick={() => openEdit(booking)}><Edit3 size={14} /> Edit</button>
               <button className="btn btn-sm btn-secondary" onClick={() => generateBookingBillPDF(booking)} title="Download PDF bill"><FileText size={14} /> Bill</button>
               {booking.booking_status === 'pending' && (

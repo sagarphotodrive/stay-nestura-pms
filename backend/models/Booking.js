@@ -40,6 +40,13 @@ const bookingSchema = new mongoose.Schema({
   // guest-asserted claim only, never proof of payment. Staff verify the actual UPI/bank
   // transfer and confirm the booking manually (see Bookings.js "Confirm Booking").
   payment_claimed_at: String,
+  // Set by the daily job that marks bookings paid 7 days after check-out when staff
+  // never recorded the payment — distinguishes these from payments actually recorded.
+  auto_marked_paid_at: String,
+  // Set by the hourly job when staff didn't update the status themselves: checked in
+  // 24h after the scheduled check-in time, checked out 24h after the scheduled check-out time.
+  auto_checked_in_at: String,
+  auto_checked_out_at: String,
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 module.exports = mongoose.model('Booking', bookingSchema);

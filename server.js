@@ -36,6 +36,7 @@ async function nextId(collection) {
 const { validateBookingAmounts } = require('./backend/utils/bookingMath');
 const { computeDueDates } = require('./backend/utils/recurringExpenses');
 const { hasBookingConflict, getUnavailableRanges } = require('./backend/utils/availability');
+const { decideStayStatusUpdate } = require('./backend/utils/stayStatus');
 
 // Import auth route (has demo login)
 const authRoutes = require('./backend/routes/auth');
@@ -2180,6 +2181,57 @@ setTimeout(() => {
   processRecurringExpenses().catch(err => console.error('Recurring expense startup check failed:', err));
 }, 10000);
 
+// Auto-mark payments: staff often don't use "Record Payment", so any active booking that
+// is still not fully paid 7 days after check-out is marked paid in full (same effect as
+// recording the remaining balance) and tagged with auto_marked_paid_at.
+const AUTO_PAID_AFTER_DAYS = 7;
+async function autoMarkOldBookingsPaid() {
+  const todayIST = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' })).toISOString().split('T')[0];
+  const cutoff = new Date(Date.parse(todayIST) - AUTO_PAID_AFTER_DAYS * 86400000).toISOString().split('T')[0];
+  const now = new Date().toISOString();
+  const due = b => b.payment_status !== 'paid' && !['cancelled', 'pending'].includes(b.booking_status) && b.check_out && b.check_out <= cutoff;
+  let count = 0;
+  if (useMongo) {
+    const bks = await Booking.find({ payment_status: { $ne: 'paid' }, booking_status: { $nin: ['cancelled', 'pending'] }, check_out: { $lte: cutoff } }).lean();
+    for (const b of bks) {
+      await Booking.updateOne({ id: b.id }, { $set: { paid_amount: b.gross_amount || 0, pending_amount: 0, payment_status: 'paid', auto_marked_paid_at: now } });
+      count++;
+    }
+  } else {
+    store.bookings.filter(due).forEach(b => { Object.assign(b, { paid_amount: b.gross_amount || 0, pending_amount: 0, payment_status: 'paid', auto_marked_paid_at: now, updated_at: now }); count++; });
+  }
+  if (count) console.log(`Auto-marked ${count} booking(s) as paid (checked out on or before ${cutoff})`);
+  return count;
+}
+cron.schedule('15 6 * * *', () => {
+  autoMarkOldBookingsPaid().catch(err => console.error('Auto-mark-paid job failed:', err));
+}, { timezone: 'Asia/Kolkata' });
+// Also runs once after boot, right after the database connects (see connectDB below),
+// in case the server was asleep or restarting at 6:15.
+
+// Auto status updates (rules in backend/utils/stayStatus.js): 24h after the scheduled
+// check-in time → checked-in; 24h after the scheduled check-out time → checked-out.
+async function autoUpdateStayStatuses() {
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+  const bks = useMongo
+    ? await Booking.find({ booking_status: { $in: ['confirmed', 'checked-in'] } }).lean()
+    : store.bookings.filter(b => b.booking_status === 'confirmed' || b.booking_status === 'checked-in');
+  let checkedIn = 0, checkedOut = 0;
+  for (const b of bks) {
+    const update = decideStayStatusUpdate(b, nowMs);
+    if (!update) continue;
+    if (update.booking_status === 'checked-out') checkedOut++; else checkedIn++;
+    if (useMongo) await Booking.updateOne({ id: b.id }, { $set: update });
+    else Object.assign(b, update, { updated_at: nowIso });
+  }
+  if (checkedIn || checkedOut) console.log(`Auto status update: ${checkedIn} checked in, ${checkedOut} checked out`);
+  return { checkedIn, checkedOut };
+}
+cron.schedule('5 * * * *', () => {
+  autoUpdateStayStatuses().catch(err => console.error('Auto status job failed:', err));
+}, { timezone: 'Asia/Kolkata' });
+
 // Keep-alive: Render's free plan puts the service to sleep after ~15 minutes without
 // incoming traffic, so the first visitor afterwards waits 30-60s for a cold start.
 // Every 14 min 30 s (default) we request our own public /api/health URL. It must be the
@@ -2239,6 +2291,9 @@ connectDB().then(connected => {
   console.log(`Database: ${useMongo ? 'MongoDB' : 'In-Memory'}`);
 }).catch(() => {
   console.log('Database: In-Memory (MongoDB failed)');
+}).finally(() => {
+  autoMarkOldBookingsPaid().catch(err => console.error('Auto-mark-paid startup check failed:', err));
+  autoUpdateStayStatuses().catch(err => console.error('Auto status startup check failed:', err));
 });
 
 module.exports = { app, server, io };
