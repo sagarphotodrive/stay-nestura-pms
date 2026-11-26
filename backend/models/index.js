@@ -8,4 +8,5 @@ module.exports = {
   Availability: require('./Availability'),
   SyncLog: require('./SyncLog'),
   Counter: require('./Counter'),
+  IcalLink: require('./IcalLink'),
 };

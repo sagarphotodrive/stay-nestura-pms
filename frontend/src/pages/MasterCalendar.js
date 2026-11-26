@@ -31,6 +31,10 @@ const MasterCalendar = () => {
   const [viewDate, setViewDate] = useState(() => { const d = new Date(); d.setHours(0,0,0,0); return addDays(d, -1); });
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [icalLinks, setIcalLinks] = useState([]);
+  const [otaBlocks, setOtaBlocks] = useState([]);
+  const [selectedBlock, setSelectedBlock] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const [icalError, setIcalError] = useState('');
   const [showIcalSection, setShowIcalSection] = useState(false);
   const [icalForm, setIcalForm] = useState({ property_id: '', channel: 'airbnb', ical_url: '', label: '' });
   const navigate = useNavigate();
@@ -42,7 +46,7 @@ const MasterCalendar = () => {
 
   const fetchData = async () => {
     try {
-      const [propRes, bookingRes, icalRes] = await Promise.all([
+      const [propRes, bookingRes, icalRes, blocksRes] = await Promise.all([
         api.get('/properties'),
         api.get('/bookings', {
           params: {
@@ -50,11 +54,18 @@ const MasterCalendar = () => {
             end_date: format(days[days.length - 1], 'yyyy-MM-dd')
           }
         }),
-        api.get('/ical-links')
+        api.get('/ical-links'),
+        api.get('/ical-blocks', {
+          params: {
+            start: format(days[0], 'yyyy-MM-dd'),
+            end: format(addDays(days[days.length - 1], 1), 'yyyy-MM-dd')
+          }
+        })
       ]);
       setProperties(propRes.data);
       setBookings(bookingRes.data.bookings || []);
       setIcalLinks(icalRes.data || []);
+      setOtaBlocks(blocksRes.data || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -72,13 +83,26 @@ const MasterCalendar = () => {
     );
   };
 
+  const getBlockForDate = (propertyId, date) => {
+    const dateStr = format(date, 'yyyy-MM-dd');
+    return otaBlocks.find(b => b.property_id === propertyId && b.start <= dateStr && b.end > dateStr);
+  };
+
   const handleAddIcalLink = async (e) => {
     e.preventDefault();
+    setIcalError('');
     try {
       await api.post('/ical-links', { ...icalForm, property_id: parseInt(icalForm.property_id) });
       setIcalForm({ property_id: '', channel: 'airbnb', ical_url: '', label: '' });
       fetchData();
-    } catch (err) { console.error(err); }
+    } catch (err) { setIcalError(err.response?.data?.error || 'Could not add calendar link'); }
+  };
+
+  const syncNow = async () => {
+    setSyncing(true);
+    try { await api.post('/ical-links/sync'); await fetchData(); }
+    catch (err) { setIcalError(err.response?.data?.error || 'Sync failed'); }
+    finally { setSyncing(false); }
   };
 
   const deleteIcalLink = async (id) => {
@@ -118,7 +142,21 @@ const MasterCalendar = () => {
               <div className="property-col" style={{ borderLeft: `4px solid ${color.badge}` }}>{property.name}</div>
               {days.map(day => {
                 const booking = getBookingForDate(property.id, day);
+                const block = !booking && getBlockForDate(property.id, day);
                 const isToday = format(day, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd');
+                if (block) {
+                  return (
+                    <div
+                      key={day.toISOString()}
+                      className={`day-cell booked ota-blocked ${isToday ? 'today' : ''}`}
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => setSelectedBlock(block)}
+                      title={`Blocked on ${block.channel}${block.summary ? ` — ${block.summary}` : ''}`}
+                    >
+                      <div className="booking-badge ota-block-badge">{(block.channel || '?')[0].toUpperCase()}</div>
+                    </div>
+                  );
+                }
                 return (
                   <div
                     key={day.toISOString()}
@@ -159,6 +197,10 @@ const MasterCalendar = () => {
         <div className="legend-item">
           <div className="legend-color booked"></div>
           <span>Booked</span>
+        </div>
+        <div className="legend-item">
+          <div className="legend-color ota-blocked"></div>
+          <span>Blocked on OTA (Booking.com, Airbnb…)</span>
         </div>
         <div className="legend-item">
           <div className="legend-color today"></div>
@@ -228,6 +270,26 @@ const MasterCalendar = () => {
         </div>
       )}
 
+      {/* OTA Block Detail Modal */}
+      {selectedBlock && (
+        <div className="modal-overlay" onClick={() => setSelectedBlock(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Blocked on {selectedBlock.channel}</h2>
+              <button className="modal-close" onClick={() => setSelectedBlock(null)}><X size={20}/></button>
+            </div>
+            <div className="booking-detail-modal">
+              <div className="detail-row"><span className="detail-label">Property</span><span className="detail-value">{properties.find(p => p.id === selectedBlock.property_id)?.name}</span></div>
+              <div className="detail-row"><span className="detail-label">From</span><span className="detail-value">{safeFormat(selectedBlock.start, 'MMM dd, yyyy')}</span></div>
+              <div className="detail-row"><span className="detail-label">Until (checkout)</span><span className="detail-value">{safeFormat(selectedBlock.end, 'MMM dd, yyyy')}</span></div>
+              <div className="detail-row"><span className="detail-label">OTA says</span><span className="detail-value">{selectedBlock.summary || '—'}</span></div>
+              <div className="detail-row"><span className="detail-label">Calendar</span><span className="detail-value">{selectedBlock.label}</span></div>
+              <p className="empty-state-sm" style={{ marginTop: 12 }}>Imported from the OTA calendar. To free these dates, unblock them on {selectedBlock.channel}; it updates here at the next sync (every 15 min).</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* OTA Calendar Links Section */}
       <div className="ical-section">
         <div className="ical-header" onClick={() => setShowIcalSection(!showIcalSection)} style={{ cursor: 'pointer' }}>
@@ -236,6 +298,11 @@ const MasterCalendar = () => {
         </div>
         {showIcalSection && (
           <div className="ical-content">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+              <button className="btn btn-sm btn-secondary" onClick={syncNow} disabled={syncing}>{syncing ? 'Syncing…' : 'Sync now'}</button>
+              <span className="empty-state-sm">OTA calendars sync automatically every 15 minutes.</span>
+            </div>
+            {icalError && <div className="availability-indicator conflict" style={{ marginBottom: 12 }}><AlertCircle size={16} /> {icalError}</div>}
             {properties.map(prop => {
               const propLinks = icalLinks.filter(l => l.property_id === prop.id);
               const propSlug = prop.name.toLowerCase().replace(/\s+by\s+stay\s+nestura/i, '').trim().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '');
@@ -255,6 +322,11 @@ const MasterCalendar = () => {
                         <div key={link.id} className="ical-link-item">
                           <span className={`channel-tag ${link.channel}`}>{link.channel}</span>
                           <span className="ical-label">{link.label}</span>
+                          <span className="ical-sync-status" style={{ fontSize: 12, color: link.last_sync_status === 'failed' ? '#ef4444' : '#94a3b8' }}>
+                            {!link.last_synced_at ? 'Not synced yet'
+                              : link.last_sync_status === 'failed' ? `Sync failed: ${link.last_error}`
+                              : `${link.event_count} block(s) · synced ${safeFormat(link.last_synced_at, 'dd MMM, HH:mm')}`}
+                          </span>
                           {link.ical_url && (
                             <a href={link.ical_url} target="_blank" rel="noopener noreferrer" className="ical-url-link"><ExternalLink size={14} /></a>
                           )}
@@ -293,7 +365,7 @@ const MasterCalendar = () => {
               <div className="form-row">
                 <div className="form-group">
                   <label>iCal URL</label>
-                  <input value={icalForm.ical_url} onChange={e => setIcalForm({...icalForm, ical_url: e.target.value})} placeholder="https://..." />
+                  <input required type="url" value={icalForm.ical_url} onChange={e => setIcalForm({...icalForm, ical_url: e.target.value})} placeholder="https://..." />
                 </div>
                 <div className="form-group">
                   <label>Label</label>

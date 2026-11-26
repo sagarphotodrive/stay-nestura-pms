@@ -2241,3 +2241,10 @@ a:hover {
 }
 .public-booking-success h2 { margin: 4px 0; }
 .public-booking-ref { font-weight: 700; color: var(--primary); margin-top: 8px; }
+
+/* Dates blocked on an imported OTA calendar (Booking.com, Airbnb, ...) */
+.day-cell.ota-blocked,
+.legend-color.ota-blocked {
+  background: repeating-linear-gradient(45deg, rgba(100, 116, 139, 0.25) 0 6px, rgba(100, 116, 139, 0.08) 6px 12px);
+}
+.ota-block-badge { background: #64748b; }

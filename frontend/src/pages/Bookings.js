@@ -327,6 +327,11 @@ const Bookings = () => {
                   )}
                 </div>
               )}
+              {availabilityStatus?.ota_blocks?.length > 0 && (
+                <div className="availability-indicator conflict">
+                  <AlertCircle size={16} /> Blocked on OTA calendar: {availabilityStatus.ota_blocks.map(b => `${b.channel} (${b.start} to ${b.end}${b.summary ? ', ' + b.summary : ''})`).join('; ')}. Save only if this is that same booking.
+                </div>
+              )}
 
               <div className="form-row">
                 <div className="form-group"><label>Adults</label><input type="number" min="1" value={bForm.adults} onChange={e => setBForm({...bForm, adults: e.target.value})}/></div>

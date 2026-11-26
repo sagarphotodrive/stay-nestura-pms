@@ -25,7 +25,8 @@ const { store } = require('./backend/config/database');
 
 // MongoDB support
 const { connectDB, isMongoConnected } = require('./backend/config/mongoose');
-const { Property, Guest, Booking, Expense, ChannelAccount, User, Availability, SyncLog, Counter } = require('./backend/models');
+const { Property, Guest, Booking, Expense, ChannelAccount, User, Availability, SyncLog, Counter, IcalLink } = require('./backend/models');
+const { parseIcsEvents } = require('./backend/utils/ical');
 const { EXPENSE_CATEGORIES, BOOKING_STATUSES, PAYMENT_STATUSES } = require('./backend/config/constants');
 
 // Helper: get next auto-increment ID for MongoDB
@@ -262,6 +263,28 @@ app.get('/api/bookings/stats/overview', async (req, res) => {
     res.json({ summary: { total_bookings: bks.length, cancelled_bookings: cancelledBks.length, total_gross: bks.reduce((s,b) => s+(b.gross_amount||0), 0), total_net: bks.reduce((s,b) => s+(b.net_amount||0), 0), confirmed_bookings: bks.filter(b => b.booking_status === 'confirmed').length, unique_guests: new Set(bks.map(b => b.guest_id)).size }, occupancy: props.map(p => { const propBks = bks.filter(b => b.property_id === p.id); const nightsBooked = calcNights(propBks); const available = p.total_rooms * daysInMonth; return { property_id: p.id, property_name: p.name, total_nights_booked: nightsBooked, total_nights_available: available, occupancy_percent: Math.round(nightsBooked / Math.max(1, available) * 100) }; }) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+// Must be declared before /api/bookings/:id, which would otherwise match "check-availability" as an id
+app.get('/api/bookings/check-availability', async (req, res) => {
+  try {
+    const { property_id, check_in, check_out, exclude_booking_id } = req.query;
+    if (!property_id || !check_in || !check_out) return res.status(400).json({ error: 'property_id, check_in, and check_out are required' });
+    const excludeId = exclude_booking_id ? parseInt(exclude_booking_id) : null;
+    let conflictBookings;
+    if (useMongo) {
+      const filter = { property_id: parseInt(property_id), booking_status: { $ne: 'cancelled' }, check_in: { $lt: check_out }, check_out: { $gt: check_in } };
+      if (excludeId) filter.id = { $ne: excludeId };
+      conflictBookings = await Booking.find(filter).lean();
+    } else {
+      conflictBookings = store.bookings.filter(b => b.property_id == property_id && b.booking_status !== 'cancelled' && b.check_in < check_out && b.check_out > check_in && (!excludeId || b.id !== excludeId));
+    }
+    const guestsList = useMongo ? await Guest.find().lean() : store.guests;
+    const conflicts = conflictBookings.map(b => { const g = guestsList.find(gs => gs.id === b.guest_id) || {}; return { id: b.id, guest_name: `${g.first_name || ''} ${g.last_name || ''}`.trim(), check_in: b.check_in, check_out: b.check_out, channel: b.channel }; });
+    // OTA blocks are a warning only: staff often enter the same Booking.com/Airbnb
+    // reservation here by hand, which must not be rejected because its block was imported.
+    const ota_blocks = await getImportedBlocks({ propertyId: parseInt(property_id), start: check_in, end: check_out });
+    res.json({ available: conflicts.length === 0, conflicts, ota_blocks });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 app.get('/api/bookings/:id', async (req, res) => {
   try {
     let b;
@@ -299,24 +322,6 @@ app.get('/api/bookings', async (req, res) => {
     const enriched = bks.map(b => { const p = (props || []).find(pr => pr.id === b.property_id) || {}; const g = (guests || []).find(gs => gs.id === b.guest_id) || {}; return { ...b, property_name: p.name, address: p.address, google_maps_link: p.google_maps_link, first_name: g.first_name, last_name: g.last_name, email: g.email, phone: g.phone }; });
     const page = parseInt(req.query.page) || 1; const limit = parseInt(req.query.limit) || (req.query.start_date ? 500 : 20);
     res.json({ bookings: enriched.slice((page-1)*limit, page*limit), total: enriched.length, page, pages: Math.ceil(enriched.length/limit) });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-app.get('/api/bookings/check-availability', async (req, res) => {
-  try {
-    const { property_id, check_in, check_out, exclude_booking_id } = req.query;
-    if (!property_id || !check_in || !check_out) return res.status(400).json({ error: 'property_id, check_in, and check_out are required' });
-    const excludeId = exclude_booking_id ? parseInt(exclude_booking_id) : null;
-    let conflictBookings;
-    if (useMongo) {
-      const filter = { property_id: parseInt(property_id), booking_status: { $ne: 'cancelled' }, check_in: { $lt: check_out }, check_out: { $gt: check_in } };
-      if (excludeId) filter.id = { $ne: excludeId };
-      conflictBookings = await Booking.find(filter).lean();
-    } else {
-      conflictBookings = store.bookings.filter(b => b.property_id == property_id && b.booking_status !== 'cancelled' && b.check_in < check_out && b.check_out > check_in && (!excludeId || b.id !== excludeId));
-    }
-    const guestsList = useMongo ? await Guest.find().lean() : store.guests;
-    const conflicts = conflictBookings.map(b => { const g = guestsList.find(gs => gs.id === b.guest_id) || {}; return { id: b.id, guest_name: `${g.first_name || ''} ${g.last_name || ''}`.trim(), check_in: b.check_in, check_out: b.check_out, channel: b.channel }; });
-    res.json({ available: conflicts.length === 0, conflicts });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 app.post('/api/bookings', async (req, res) => {
@@ -563,7 +568,10 @@ app.get('/api/public/properties/:id/availability', async (req, res) => {
     let avail = useMongo ? await Availability.find({ property_id: id }).lean() : store.availability.filter(a => a.property_id === id);
     if (start) avail = avail.filter(a => a.date >= start);
     if (end) avail = avail.filter(a => a.date <= end);
-    res.json(getUnavailableRanges(bookings, avail));
+    const otaBlocks = await getImportedBlocks({ propertyId: id, start, end });
+    const result = getUnavailableRanges(bookings, avail);
+    result.bookedRanges.push(...otaBlocks.map(b => ({ check_in: b.start, check_out: b.end })));
+    res.json(result);
   } catch (err) {
     console.error(`GET /api/public/properties/${req.params.id}/availability failed:`, err);
     res.status(500).json({ error: err.message });
@@ -584,7 +592,8 @@ app.post('/api/public/bookings', publicBookingLimiter, async (req, res) => {
     if (!property) return res.status(404).json({ error: 'Property not found' });
 
     const existingBks = useMongo ? await Booking.find({ property_id: propertyId }).lean() : store.bookings.filter(bk => bk.property_id === propertyId);
-    if (hasBookingConflict(existingBks, b.check_in, b.check_out)) {
+    const otaBlocks = await getImportedBlocks({ propertyId, start: b.check_in, end: b.check_out });
+    if (otaBlocks.length > 0 || hasBookingConflict(existingBks, b.check_in, b.check_out)) {
       return res.status(409).json({ error: 'DATES_UNAVAILABLE', message: 'These dates are no longer available. Please choose different dates.' });
     }
 
@@ -1250,23 +1259,96 @@ app.get('/api/properties/:id/ical.ics', async (req, res) => {
 });
 
 // --- ICAL LINKS ---
-app.get('/api/ical-links', (req, res) => {
-  let links = store.ical_links || [];
-  if (req.query.property_id) links = links.filter(l => l.property_id == req.query.property_id);
-  res.json(links);
-});
-app.post('/api/ical-links', (req, res) => {
-  const b = req.body;
+// Imported OTA calendars. Links are saved in MongoDB (in-memory fallback) and their iCal
+// URLs are fetched every 15 minutes; the fetched blocks show on the Master Calendar and
+// count as unavailable dates when creating bookings.
+const getIcalLinks = async (filter = {}) => {
+  if (useMongo) return IcalLink.find(filter).lean();
   if (!store.ical_links) store.ical_links = [];
-  const link = { id: _nextId(), property_id: parseInt(b.property_id), channel: b.channel || 'other', ical_url: b.ical_url || '', label: b.label || b.channel || 'Calendar Link', created_at: new Date().toISOString() };
-  store.ical_links.push(link);
-  res.status(201).json(link);
+  return store.ical_links.filter(l => filter.property_id === undefined || l.property_id === filter.property_id);
+};
+const linkForClient = ({ events, ...l }) => ({ ...l, event_count: (events || []).length });
+
+async function syncIcalLink(link) {
+  const update = { last_synced_at: new Date() };
+  try {
+    if (!/^https?:\/\//i.test(link.ical_url || '')) throw new Error('No valid iCal URL');
+    const resp = await fetch(link.ical_url, { signal: AbortSignal.timeout(20000), headers: { 'User-Agent': 'StayNesturaPMS/1.0 (iCal sync)' } });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const text = await resp.text();
+    if (!text.includes('BEGIN:VCALENDAR')) throw new Error('Response is not an iCal calendar');
+    Object.assign(update, { events: parseIcsEvents(text), last_sync_status: 'success', last_error: null });
+  } catch (err) {
+    // Keep the previous events on failure so a temporary OTA outage doesn't unblock dates
+    Object.assign(update, { last_sync_status: 'failed', last_error: err.message });
+  }
+  if (useMongo) await IcalLink.updateOne({ id: link.id }, { $set: update });
+  else Object.assign(link, update);
+  return { ...link, ...update };
+}
+
+async function syncAllIcalLinks() {
+  const links = await getIcalLinks();
+  const results = [];
+  for (const l of links) results.push(await syncIcalLink(l));
+  const failed = results.filter(r => r.last_sync_status === 'failed');
+  if (links.length) console.log(`iCal sync: ${links.length - failed.length}/${links.length} calendars OK${failed.length ? ` — failed: ${failed.map(f => `${f.label} (${f.last_error})`).join(', ')}` : ''}`);
+  return results;
+}
+
+// Imported blocks overlapping [start, end) — end exclusive, like booking check_out
+async function getImportedBlocks({ propertyId, start, end } = {}) {
+  const links = await getIcalLinks(propertyId !== undefined ? { property_id: propertyId } : {});
+  const blocks = [];
+  for (const l of links) {
+    for (const e of l.events || []) {
+      if (start && e.end <= start) continue;
+      if (end && e.start >= end) continue;
+      blocks.push({ link_id: l.id, property_id: l.property_id, channel: l.channel, label: l.label, uid: e.uid, start: e.start, end: e.end, summary: e.summary });
+    }
+  }
+  return blocks;
+}
+
+app.get('/api/ical-links', async (req, res) => {
+  try {
+    const links = await getIcalLinks(req.query.property_id ? { property_id: parseInt(req.query.property_id) } : {});
+    res.json(links.map(linkForClient));
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.delete('/api/ical-links/:id', (req, res) => {
-  if (!store.ical_links) store.ical_links = [];
-  const idx = store.ical_links.findIndex(l => l.id == req.params.id);
-  if (idx >= 0) store.ical_links.splice(idx, 1);
-  res.json({ message: 'Deleted' });
+app.post('/api/ical-links', async (req, res) => {
+  try {
+    const b = req.body;
+    if (!b.property_id) return res.status(400).json({ error: 'property_id is required' });
+    if (!/^https?:\/\//i.test((b.ical_url || '').trim())) return res.status(400).json({ error: 'A valid iCal URL (https://...) is required' });
+    const data = { property_id: parseInt(b.property_id), channel: b.channel || 'other', ical_url: b.ical_url.trim(), label: b.label || b.channel || 'Calendar Link', events: [] };
+    let link;
+    if (useMongo) link = (await IcalLink.create({ id: await nextId('ical_links'), ...data })).toObject();
+    else { if (!store.ical_links) store.ical_links = []; link = { id: _nextId(), ...data, created_at: new Date().toISOString() }; store.ical_links.push(link); }
+    const synced = await syncIcalLink(link);
+    res.status(201).json(linkForClient(synced));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.delete('/api/ical-links/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (useMongo) await IcalLink.deleteOne({ id });
+    else if (store.ical_links) store.ical_links = store.ical_links.filter(l => l.id !== id);
+    res.json({ message: 'Deleted' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.post('/api/ical-links/sync', async (req, res) => {
+  try { res.json((await syncAllIcalLinks()).map(linkForClient)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.get('/api/ical-blocks', async (req, res) => {
+  try {
+    const { start, end, property_id } = req.query;
+    res.json(await getImportedBlocks({ propertyId: property_id ? parseInt(property_id) : undefined, start, end }));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+cron.schedule('*/15 * * * *', () => {
+  syncAllIcalLinks().catch(err => console.error('iCal sync job failed:', err));
 });
 
 // --- CHANNEL MANAGER ---
@@ -2294,6 +2376,7 @@ connectDB().then(connected => {
 }).finally(() => {
   autoMarkOldBookingsPaid().catch(err => console.error('Auto-mark-paid startup check failed:', err));
   autoUpdateStayStatuses().catch(err => console.error('Auto status startup check failed:', err));
+  syncAllIcalLinks().catch(err => console.error('iCal startup sync failed:', err));
 });
 
 module.exports = { app, server, io };
