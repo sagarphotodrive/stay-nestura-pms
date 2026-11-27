@@ -2248,3 +2248,40 @@ a:hover {
   background: repeating-linear-gradient(45deg, rgba(100, 116, 139, 0.25) 0 6px, rgba(100, 116, 139, 0.08) 6px 12px);
 }
 .ota-block-badge { background: #64748b; }
+
+/* ====== Mobile filters (phones) ======
+   Below 640px the filter bars used to squeeze 4-5 fields into one row, cutting the
+   selected value down to "All Pro" / "dd-mm". On phones: dropdowns take the full width,
+   the From/To dates share a row, and controls are 44px tall with 16px text (readable,
+   and big enough that the phone doesn't zoom in when one is tapped). */
+@media (max-width: 639px) {
+  .filter-bar {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 12px;
+    padding: 12px;
+  }
+  .filter-group:has(select),
+  .filter-bar > .btn { grid-column: 1 / -1; }
+  .filter-group label { font-size: 11px; font-weight: 600; }
+  .filter-group select,
+  .filter-group input,
+  .report-filters select {
+    min-height: 44px;
+    font-size: 16px;
+    padding: 8px 10px;
+    color: var(--text-primary);
+    background-color: var(--bg-primary);
+  }
+  .filter-group input[type="date"] { -webkit-appearance: none; appearance: none; display: block; min-width: 0; }
+  .filter-bar > .btn { width: 100%; min-height: 44px; }
+
+  /* Status pills: one row that scrolls sideways instead of wrapping onto two rows */
+  .filters { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: 2px; }
+  .filters::-webkit-scrollbar { display: none; }
+  .filter-btn { flex: 0 0 auto; white-space: nowrap; }
+
+  /* Reports: property on its own row, month + year side by side */
+  .report-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; }
+  .report-filters select:first-child { grid-column: 1 / -1; }
+}
